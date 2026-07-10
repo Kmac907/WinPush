@@ -1,5 +1,6 @@
 $script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..\src\WinPush')
 $script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Targeting\Resolve-WinPushTarget.ps1'
+$script:FixtureRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\Fixtures\TargetResolution')
 
 . $script:ResolverPath
 
@@ -92,6 +93,47 @@ Describe 'Resolve-WinPushTarget' {
 
     It 'fails locally when no usable pipeline target remains' {
         { @('', ' ', "`t") | Resolve-WinPushTarget } | Should Throw 'At least one usable computer name is required.'
+    }
+
+    It 'resolves UTF-8 host file targets in file order' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'valid-hosts.txt'
+        $utf8Target = 'pc-utf8-{0}01' -f [char] 0x00e9
+
+        $targets = @(Resolve-WinPushTarget -HostFile $hostFile)
+
+        $targets.Count | Should Be 3
+        ($targets -join ',') | Should Be "PC-001,$utf8Target,PC-003"
+    }
+
+    It 'ignores host file comments and blanks without removing duplicates' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'duplicate-comment-hosts.txt'
+
+        $targets = @(Resolve-WinPushTarget -HostFile $hostFile)
+
+        $targets.Count | Should Be 3
+        ($targets -join ',') | Should Be 'PC-001,PC-001,PC-002'
+    }
+
+    It 'fails locally when the host file path is missing' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'missing-hosts.txt'
+
+        { Resolve-WinPushTarget -HostFile $hostFile } | Should Throw 'Host file was not found:'
+    }
+
+    It 'fails locally when the host file path is a directory' {
+        { Resolve-WinPushTarget -HostFile $script:FixtureRoot } | Should Throw 'Host file path must reference a file:'
+    }
+
+    It 'fails locally when the host file is empty' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'empty-hosts.txt'
+
+        { Resolve-WinPushTarget -HostFile $hostFile } | Should Throw 'At least one usable computer name is required.'
+    }
+
+    It 'fails locally when the host file contains only comments and blanks' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'comments-only-hosts.txt'
+
+        { Resolve-WinPushTarget -HostFile $hostFile } | Should Throw 'At least one usable computer name is required.'
     }
 
     It 'does not contain network or remoting calls' {
