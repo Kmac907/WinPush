@@ -36,6 +36,64 @@ Describe 'Resolve-WinPushTarget' {
         { Resolve-WinPushTarget -ComputerName @('', ' ', "`t") } | Should Throw 'At least one usable computer name is required.'
     }
 
+    It 'resolves pipeline string computer names in input order' {
+        $targets = @(@('PC-001', 'PC-002', 'PC-003') | Resolve-WinPushTarget)
+
+        $targets.Count | Should Be 3
+        ($targets -join ',') | Should Be 'PC-001,PC-002,PC-003'
+    }
+
+    It 'trims and removes unusable blank pipeline string values' {
+        $targets = @(@(' PC-001 ', '', "`t", "`r`nPC-002 ") | Resolve-WinPushTarget)
+
+        $targets.Count | Should Be 2
+        ($targets -join ',') | Should Be 'PC-001,PC-002'
+    }
+
+    It 'resolves pipeline objects by ComputerName property in input order' {
+        $inputObjects = @(
+            [pscustomobject] @{ ComputerName = 'PC-001' }
+            [pscustomobject] @{ ComputerName = ' PC-002 ' }
+            [pscustomobject] @{ ComputerName = 'PC-003' }
+        )
+
+        $targets = @($inputObjects | Resolve-WinPushTarget)
+
+        $targets.Count | Should Be 3
+        ($targets -join ',') | Should Be 'PC-001,PC-002,PC-003'
+    }
+
+    It 'removes unusable blank pipeline property values without changing useful target order' {
+        $inputObjects = @(
+            [pscustomobject] @{ ComputerName = '' }
+            [pscustomobject] @{ ComputerName = 'PC-001' }
+            [pscustomobject] @{ ComputerName = ' ' }
+            [pscustomobject] @{ ComputerName = 'PC-002' }
+        )
+
+        $targets = @($inputObjects | Resolve-WinPushTarget)
+
+        $targets.Count | Should Be 2
+        ($targets -join ',') | Should Be 'PC-001,PC-002'
+    }
+
+    It 'resolves mixed pipeline batches in pipeline order' {
+        $targets = @(
+            'PC-001'
+            [pscustomobject] @{ ComputerName = ' PC-002 ' }
+            ''
+            ' PC-003 '
+            [pscustomobject] @{ ComputerName = 'PC-004' }
+        ) | Resolve-WinPushTarget
+
+        $targets.Count | Should Be 4
+        ($targets -join ',') | Should Be 'PC-001,PC-002,PC-003,PC-004'
+    }
+
+    It 'fails locally when no usable pipeline target remains' {
+        { @('', ' ', "`t") | Resolve-WinPushTarget } | Should Throw 'At least one usable computer name is required.'
+    }
+
     It 'does not contain network or remoting calls' {
         $source = Get-Content -LiteralPath $script:ResolverPath -Raw
 
