@@ -16,4 +16,8 @@ foreach ($sourcePath in @($privatePath, $publicPath)) {
     }
 }
 
-Export-ModuleMember -Function @()
+$publicFunctionsToExport = @(
+    'Test-WinPushTarget'
+)
+
+Export-ModuleMember -Function $publicFunctionsToExport

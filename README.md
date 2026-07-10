@@ -4,7 +4,7 @@
 
 `WinPush` is a PowerShell 7.6 script module for Windows administrators and automation engineers. The MVP will use PSRP over WinRM to test targets, run command text and local scripts, transfer individual files, and retrieve text logs from an explicit remote directory.
 
-This initial module slice provides only the importable module foundation. No public commands are exported until their behavior is completed and verified.
+The module currently exports the first completed public command, `Test-WinPushTarget`, for single-target PSRP connectivity checks with the current Windows identity.
 
 ## Scope
 
@@ -39,7 +39,9 @@ WinPush/
 
 ## Public Commands
 
-No public commands are exported in the current slice. Commands will be added to the manifest only after the corresponding roadmap slice is complete.
+| Command | Current behavior |
+| --- | --- |
+| `Test-WinPushTarget` | Tests PSRP session creation for one direct `-ComputerName` using the current Windows identity and returns a `WinPush.ExecutionResult`. |
 
 ## Prerequisites
 
@@ -60,13 +62,15 @@ Verify exported commands:
 Get-Command -Module WinPush
 ```
 
-The current expected result is an empty command list.
+The current expected result is:
+
+```text
+Test-WinPushTarget
+```
 
 ## Output
 
-The current slice does not expose public commands and does not return runtime operation output.
-
-Planned result contracts:
+`Test-WinPushTarget` returns a structured PowerShell object with `PSTypeName = WinPush.ExecutionResult`.
 
 | Contract | Purpose |
 | --- | --- |
@@ -98,7 +102,7 @@ Import-Module .\src\WinPush\WinPush.psd1 -Force
 
 `Experimental`
 
-The module foundation exists, but result contracts, target resolution, remoting workflows, file transfer, and log collection are not yet implemented.
+The module foundation, result contracts, target resolution, and single-target current-identity connectivity command exist. Credentialed connectivity, multi-target connectivity, command/script execution, file transfer, and log collection are not yet implemented.
 
 ## Version
 

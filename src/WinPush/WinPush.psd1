@@ -9,7 +9,9 @@
     PowerShellVersion    = '7.6'
     CompatiblePSEditions = @('Core')
 
-    FunctionsToExport    = @()
+    FunctionsToExport    = @(
+        'Test-WinPushTarget'
+    )
     CmdletsToExport      = @()
     VariablesToExport    = @()
     AliasesToExport      = @()
