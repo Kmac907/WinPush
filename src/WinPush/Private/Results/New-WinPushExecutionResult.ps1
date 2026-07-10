@@ -18,13 +18,34 @@ function New-WinPushExecutionResult {
         [Nullable[int]] $ExitCode,
 
         [AllowNull()]
+        [string] $ErrorMessage = $null,
+
+        [AllowNull()]
         [object[]] $Output = @(),
 
         [AllowNull()]
         [object[]] $Errors = @(),
 
         [AllowNull()]
-        [object[]] $Logs = @()
+        [object[]] $Logs = @(),
+
+        [AllowNull()]
+        [string] $RunDirectory = $null,
+
+        [AllowNull()]
+        [string] $ComputerDirectory = $null,
+
+        [AllowNull()]
+        [string] $ResultPath = $null,
+
+        [AllowNull()]
+        [string] $StdOutPath = $null,
+
+        [AllowNull()]
+        [string] $StdErrPath = $null,
+
+        [AllowNull()]
+        [object[]] $CopiedLogPaths = @()
     )
 
     [object[]] $normalizedOutput = @()
@@ -42,15 +63,37 @@ function New-WinPushExecutionResult {
         $normalizedLogs = @($Logs)
     }
 
-    [pscustomobject] @{
-        PSTypeName   = 'WinPush.ExecutionResult'
-        ComputerName = $ComputerName
-        Transport    = $Transport
-        Operation    = $Operation
-        Succeeded    = $Succeeded
-        ExitCode     = $ExitCode
-        Output       = $normalizedOutput
-        Errors       = $normalizedErrors
-        Logs         = $normalizedLogs
+    [object[]] $normalizedCopiedLogPaths = @()
+    if ($null -ne $CopiedLogPaths) {
+        $normalizedCopiedLogPaths = @($CopiedLogPaths)
+    }
+
+    if (-not $Succeeded -and [string]::IsNullOrWhiteSpace($ErrorMessage) -and $normalizedErrors.Count -gt 0) {
+        $ErrorMessage = [string] $normalizedErrors[0]
+    }
+
+    $normalizedRunDirectory = if ([string]::IsNullOrWhiteSpace($RunDirectory)) { $null } else { $RunDirectory }
+    $normalizedComputerDirectory = if ([string]::IsNullOrWhiteSpace($ComputerDirectory)) { $null } else { $ComputerDirectory }
+    $normalizedResultPath = if ([string]::IsNullOrWhiteSpace($ResultPath)) { $null } else { $ResultPath }
+    $normalizedStdOutPath = if ([string]::IsNullOrWhiteSpace($StdOutPath)) { $null } else { $StdOutPath }
+    $normalizedStdErrPath = if ([string]::IsNullOrWhiteSpace($StdErrPath)) { $null } else { $StdErrPath }
+
+    [pscustomobject] [ordered] @{
+        PSTypeName        = 'WinPush.ExecutionResult'
+        ComputerName      = $ComputerName
+        Transport         = $Transport
+        Operation         = $Operation
+        Succeeded         = $Succeeded
+        ExitCode          = $ExitCode
+        ErrorMessage      = $ErrorMessage
+        Output            = $normalizedOutput
+        Errors            = $normalizedErrors
+        Logs              = $normalizedLogs
+        RunDirectory      = $normalizedRunDirectory
+        ComputerDirectory = $normalizedComputerDirectory
+        ResultPath        = $normalizedResultPath
+        StdOutPath        = $normalizedStdOutPath
+        StdErrPath        = $normalizedStdErrPath
+        CopiedLogPaths    = $normalizedCopiedLogPaths
     }
 }
