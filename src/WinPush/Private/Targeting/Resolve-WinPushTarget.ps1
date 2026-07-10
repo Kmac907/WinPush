@@ -1,15 +1,33 @@
 function Resolve-WinPushTarget {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'ComputerName')]
     param(
-        [Parameter(ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(ParameterSetName = 'ComputerName', ValueFromPipeline, ValueFromPipelineByPropertyName)]
         [AllowNull()]
         [string[]] $ComputerName,
 
+        [Parameter(ParameterSetName = 'HostFile')]
         [string] $HostFile
     )
 
     begin {
         $resolvedTargets = [System.Collections.Generic.List[string]]::new()
+        $seenTargets = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+        function Add-ResolvedTarget {
+            param(
+                [AllowNull()]
+                [string] $Target
+            )
+
+            if ([string]::IsNullOrWhiteSpace($Target)) {
+                return
+            }
+
+            $trimmedTarget = $Target.Trim()
+            if ($trimmedTarget.Length -gt 0 -and $seenTargets.Add($trimmedTarget)) {
+                $resolvedTargets.Add($trimmedTarget)
+            }
+        }
 
         if (-not [string]::IsNullOrWhiteSpace($HostFile)) {
             if (-not (Test-Path -LiteralPath $HostFile)) {
@@ -31,21 +49,14 @@ function Resolve-WinPushTarget {
                     continue
                 }
 
-                $resolvedTargets.Add($trimmedLine)
+                Add-ResolvedTarget -Target $trimmedLine
             }
         }
     }
 
     process {
         foreach ($target in @($ComputerName)) {
-            if ([string]::IsNullOrWhiteSpace($target)) {
-                continue
-            }
-
-            $trimmedTarget = $target.Trim()
-            if ($trimmedTarget.Length -gt 0) {
-                $resolvedTargets.Add($trimmedTarget)
-            }
+            Add-ResolvedTarget -Target $target
         }
     }
 

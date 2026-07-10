@@ -19,6 +19,13 @@ Describe 'Resolve-WinPushTarget' {
         ($targets -join ',') | Should Be 'PC-001,PC-002,PC-003'
     }
 
+    It 'removes duplicate direct computer names case-insensitively and keeps first spelling and order' {
+        $targets = @(Resolve-WinPushTarget -ComputerName @('PC-001', 'pc-001', 'PC-002', 'Pc-002', 'PC-003'))
+
+        $targets.Count | Should Be 3
+        ($targets -join ',') | Should Be 'PC-001,PC-002,PC-003'
+    }
+
     It 'trims leading and trailing whitespace from direct computer names' {
         $targets = @(Resolve-WinPushTarget -ComputerName @(' PC-001 ', "`tPC-002`r`n"))
 
@@ -39,6 +46,13 @@ Describe 'Resolve-WinPushTarget' {
 
     It 'resolves pipeline string computer names in input order' {
         $targets = @(@('PC-001', 'PC-002', 'PC-003') | Resolve-WinPushTarget)
+
+        $targets.Count | Should Be 3
+        ($targets -join ',') | Should Be 'PC-001,PC-002,PC-003'
+    }
+
+    It 'removes duplicate pipeline string computer names case-insensitively and keeps first spelling and order' {
+        $targets = @(@('PC-001', 'pc-001', 'PC-002', 'Pc-002', 'PC-003') | Resolve-WinPushTarget)
 
         $targets.Count | Should Be 3
         ($targets -join ',') | Should Be 'PC-001,PC-002,PC-003'
@@ -91,6 +105,19 @@ Describe 'Resolve-WinPushTarget' {
         ($targets -join ',') | Should Be 'PC-001,PC-002,PC-003,PC-004'
     }
 
+    It 'removes duplicate mixed pipeline batch targets case-insensitively using one ordered contract' {
+        $targets = @(
+            'PC-001'
+            [pscustomobject] @{ ComputerName = ' pc-001 ' }
+            'PC-002'
+            [pscustomobject] @{ ComputerName = 'Pc-002' }
+            'PC-003'
+        ) | Resolve-WinPushTarget
+
+        $targets.Count | Should Be 3
+        ($targets -join ',') | Should Be 'PC-001,PC-002,PC-003'
+    }
+
     It 'fails locally when no usable pipeline target remains' {
         { @('', ' ', "`t") | Resolve-WinPushTarget } | Should Throw 'At least one usable computer name is required.'
     }
@@ -105,13 +132,19 @@ Describe 'Resolve-WinPushTarget' {
         ($targets -join ',') | Should Be "PC-001,$utf8Target,PC-003"
     }
 
-    It 'ignores host file comments and blanks without removing duplicates' {
+    It 'ignores host file comments and blanks while removing duplicates case-insensitively' {
         $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'duplicate-comment-hosts.txt'
 
         $targets = @(Resolve-WinPushTarget -HostFile $hostFile)
 
-        $targets.Count | Should Be 3
-        ($targets -join ',') | Should Be 'PC-001,PC-001,PC-002'
+        $targets.Count | Should Be 2
+        ($targets -join ',') | Should Be 'PC-001,PC-002'
+    }
+
+    It 'fails locally when direct computer names and host file are supplied together' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'valid-hosts.txt'
+
+        { Resolve-WinPushTarget -ComputerName 'PC-001' -HostFile $hostFile } | Should Throw 'Parameter set cannot be resolved'
     }
 
     It 'fails locally when the host file path is missing' {
