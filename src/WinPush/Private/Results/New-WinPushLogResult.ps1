@@ -14,11 +14,12 @@ function New-WinPushLogResult {
         [bool] $Copied,
 
         [AllowNull()]
-        [string] $Error = $null
+        [Alias('Error')]
+        [string] $ErrorMessage = $null
     )
 
     $normalizedLocalPath = if ([string]::IsNullOrWhiteSpace($LocalPath)) { $null } else { $LocalPath }
-    $normalizedError = if ([string]::IsNullOrWhiteSpace($Error)) { $null } else { $Error }
+    $normalizedError = if ([string]::IsNullOrWhiteSpace($ErrorMessage)) { $null } else { $ErrorMessage }
 
     if ($Copied) {
         if ($null -eq $normalizedLocalPath) {

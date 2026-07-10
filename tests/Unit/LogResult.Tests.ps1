@@ -26,7 +26,7 @@ Describe 'New-WinPushLogResult' {
     }
 
     It 'represents a failed log file copy without a local path' {
-        $result = New-WinPushLogResult -ComputerName 'PC-002' -RemotePath 'C:\ProgramData\EA\Logs\Install-EA\install.log' -Copied $false -Error 'Access denied'
+        $result = New-WinPushLogResult -ComputerName 'PC-002' -RemotePath 'C:\ProgramData\EA\Logs\Install-EA\install.log' -Copied $false -ErrorMessage 'Access denied'
 
         $result.ComputerName | Should Be 'PC-002'
         $result.RemotePath | Should Be 'C:\ProgramData\EA\Logs\Install-EA\install.log'
@@ -40,11 +40,11 @@ Describe 'New-WinPushLogResult' {
     }
 
     It 'rejects a successful copy with an error' {
-        { New-WinPushLogResult -ComputerName 'PC-004' -RemotePath 'C:\ProgramData\EA\Logs\Install-EA\install.log' -LocalPath 'C:\WinPush\run\PC-004\Logs\install.log' -Copied $true -Error 'failed' } | Should Throw 'Error'
+        { New-WinPushLogResult -ComputerName 'PC-004' -RemotePath 'C:\ProgramData\EA\Logs\Install-EA\install.log' -LocalPath 'C:\WinPush\run\PC-004\Logs\install.log' -Copied $true -ErrorMessage 'failed' } | Should Throw 'Error'
     }
 
     It 'rejects a failed copy with a local path' {
-        { New-WinPushLogResult -ComputerName 'PC-005' -RemotePath 'C:\ProgramData\EA\Logs\Install-EA\install.log' -LocalPath 'C:\WinPush\run\PC-005\Logs\install.log' -Copied $false -Error 'Access denied' } | Should Throw 'LocalPath'
+        { New-WinPushLogResult -ComputerName 'PC-005' -RemotePath 'C:\ProgramData\EA\Logs\Install-EA\install.log' -LocalPath 'C:\WinPush\run\PC-005\Logs\install.log' -Copied $false -ErrorMessage 'Access denied' } | Should Throw 'LocalPath'
     }
 
     It 'rejects a failed copy without an error' {

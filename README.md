@@ -79,7 +79,15 @@ Importing the module loads functions from the module-local `Private` and `Public
 
 ## Testing
 
-The import foundation is validated by:
+Run the offline quality gate from this module folder:
+
+```powershell
+.\build\build.ps1
+```
+
+The gate validates the manifest, imports the module twice, runs PSScriptAnalyzer against `src`, `tests`, and `build`, runs offline unit tests, and writes CI-readable test and coverage artifacts under `artifacts\build`.
+
+The import foundation can also be checked manually with:
 
 ```powershell
 Test-ModuleManifest .\src\WinPush\WinPush.psd1
