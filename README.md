@@ -4,7 +4,7 @@
 
 `WinPush` is a PowerShell 7.6 script module for Windows administrators and automation engineers. The MVP will use PSRP over WinRM to test targets, run command text and local scripts, transfer individual files, and retrieve text logs from an explicit remote directory.
 
-The module currently exports completed PSRP connectivity checks and a first single-target command execution path.
+The module currently exports completed PSRP connectivity checks and a first single-target command execution path with optional captured-output artifacts.
 
 ## Scope
 
@@ -41,7 +41,7 @@ WinPush/
 
 | Command | Current behavior |
 | --- | --- |
-| `Invoke-WinPushCommand` | Runs non-empty PowerShell command text on one direct `-ComputerName` target through PSRP and returns one `WinPush.ExecutionResult` summary. |
+| `Invoke-WinPushCommand` | Runs non-empty PowerShell command text on one direct `-ComputerName` target through PSRP and returns one `WinPush.ExecutionResult` summary. `-CaptureOutput` writes `stdout.txt` and `stderr.txt` under one timestamped `-OutputRoot` run folder for that target. |
 | `Test-WinPushTarget` | Tests PSRP session creation for direct `-ComputerName`, pipeline, or `-HostFile` targets sequentially using the current Windows identity or an optional `-Credential` and returns one `WinPush.ExecutionResult` per resolved target. |
 
 ## Prerequisites
@@ -81,7 +81,7 @@ Test-WinPushTarget
 
 ## Side Effects
 
-Importing the module loads functions from the module-local `Private` and `Public` folders. It does not open network connections, create remote sessions, write generated runtime output, or persist state.
+Importing the module loads functions from the module-local `Private` and `Public` folders. It does not open network connections, create remote sessions, write generated runtime output, or persist state. `Invoke-WinPushCommand -CaptureOutput` writes local `stdout.txt` and `stderr.txt` artifacts under `C:\WinPush` by default, or under the caller-supplied `-OutputRoot`.
 
 ## Testing
 
@@ -104,7 +104,7 @@ Import-Module .\src\WinPush\WinPush.psd1 -Force
 
 `Experimental`
 
-The module foundation, result contracts, target resolution, connectivity checks across direct, pipeline, and host-file targets, credential pass-through behavior, and single-target command summary execution exist. Capture-output artifacts, command error-stream semantics, multi-target command execution, script execution, file transfer, and log collection are not yet implemented.
+The module foundation, result contracts, target resolution, connectivity checks across direct, pipeline, and host-file targets, credential pass-through behavior, single-target command summary execution, and single-target command capture-output artifacts exist. Command error-stream semantics, multi-target command execution, script execution, file transfer, and log collection are not yet implemented.
 
 ## Version
 
