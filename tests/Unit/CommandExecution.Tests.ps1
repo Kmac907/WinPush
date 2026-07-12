@@ -15,12 +15,18 @@ Describe 'Invoke-WinPushCommand' {
     BeforeEach {
         $script:NewPSSessionComputerNames = @()
         $script:RemovedSessionIds = @()
+        $script:InvokedSessionComputerNames = @()
         $script:InvokedScriptBlocks = @()
         $script:SessionToReturn = [pscustomobject] @{ Id = 202; ComputerName = 'PC-001' }
         $script:InvokeCommandOutput = @('remote output')
         $script:InvokeCommandErrors = @()
         $script:NewPSSessionError = $null
         $script:InvokeCommandError = $null
+        $script:SessionIdByComputerName = @{}
+        $script:NewPSSessionErrorsByComputerName = @{}
+        $script:InvokeCommandOutputsByComputerName = @{}
+        $script:InvokeCommandErrorsByComputerName = @{}
+        $script:InvokeCommandThrowsByComputerName = @{}
     }
 
     Mock New-PSSession {
@@ -36,6 +42,14 @@ Describe 'Invoke-WinPushCommand' {
             throw $script:NewPSSessionError
         }
 
+        if ($script:NewPSSessionErrorsByComputerName.ContainsKey($ComputerName)) {
+            throw $script:NewPSSessionErrorsByComputerName[$ComputerName]
+        }
+
+        if ($script:SessionIdByComputerName.ContainsKey($ComputerName)) {
+            return [pscustomobject] @{ Id = $script:SessionIdByComputerName[$ComputerName]; ComputerName = $ComputerName }
+        }
+
         return $script:SessionToReturn
     }
 
@@ -45,17 +59,34 @@ Describe 'Invoke-WinPushCommand' {
             [scriptblock] $ScriptBlock
         )
 
-        $null = $Session
+        if ($null -ne $Session -and -not [string]::IsNullOrWhiteSpace($Session.ComputerName)) {
+            $script:InvokedSessionComputerNames += $Session.ComputerName
+        }
+
         $script:InvokedScriptBlocks += $ScriptBlock.ToString()
 
         if ($null -ne $script:InvokeCommandError) {
             throw $script:InvokeCommandError
         }
 
+        if ($script:InvokeCommandThrowsByComputerName.ContainsKey($Session.ComputerName)) {
+            throw $script:InvokeCommandThrowsByComputerName[$Session.ComputerName]
+        }
+
+        $output = $script:InvokeCommandOutput
+        if ($script:InvokeCommandOutputsByComputerName.ContainsKey($Session.ComputerName)) {
+            $output = $script:InvokeCommandOutputsByComputerName[$Session.ComputerName]
+        }
+
+        $errors = $script:InvokeCommandErrors
+        if ($script:InvokeCommandErrorsByComputerName.ContainsKey($Session.ComputerName)) {
+            $errors = $script:InvokeCommandErrorsByComputerName[$Session.ComputerName]
+        }
+
         return [pscustomobject] [ordered] @{
             PSTypeName = 'WinPush.PsrpCommandResult'
-            Output     = @($script:InvokeCommandOutput)
-            Errors     = @($script:InvokeCommandErrors)
+            Output     = @($output)
+            Errors     = @($errors)
         }
     }
 
@@ -100,6 +131,44 @@ Describe 'Invoke-WinPushCommand' {
         $results[0].Output[0] | Should Be 'remote output'
     }
 
+    It 'runs direct ComputerName arrays in resolved order without duplicate targets' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+            'PC-003' = 203
+        }
+
+        $results = @(Invoke-WinPushCommand -ComputerName @(' PC-001 ', 'pc-001', 'PC-002', 'PC-003') -Command 'hostname')
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:RemovedSessionIds -join ',') | Should Be '201,202,203'
+    }
+
+    It 'continues to later direct ComputerName targets after one target fails' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-003' = 203
+        }
+        $script:NewPSSessionErrorsByComputerName = @{
+            'PC-002' = 'connection failed'
+        }
+
+        $results = @(Invoke-WinPushCommand -ComputerName @('PC-001', 'PC-002', 'PC-003') -Command 'hostname')
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $false
+        $results[1].ErrorMessage | Should Be 'connection failed'
+        $results[2].Succeeded | Should Be $true
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-003'
+        ($script:RemovedSessionIds -join ',') | Should Be '201,203'
+    }
+
     It 'captures command output to one target artifact folder when requested' {
         $script:InvokeCommandOutput = @('first line', 'second line')
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
@@ -117,6 +186,29 @@ Describe 'Invoke-WinPushCommand' {
         @(Get-Content -LiteralPath $result.StdErrPath).Count | Should Be 0
         @($result.Output).Count | Should Be 2
         $result.Output[0] | Should Be 'first line'
+    }
+
+    It 'captures direct ComputerName array output under one shared run folder' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+        $script:InvokeCommandOutputsByComputerName = @{
+            'PC-001' = @('first target')
+            'PC-002' = @('second target')
+        }
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
+
+        $results = @(Invoke-WinPushCommand -ComputerName @('PC-001', 'PC-002') -Command 'hostname' -CaptureOutput -OutputRoot $outputRoot)
+
+        @($results).Count | Should Be 2
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
+        $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        (Get-Content -LiteralPath $results[0].StdOutPath) -join ',' | Should Be 'first target'
+        (Get-Content -LiteralPath $results[1].StdOutPath) -join ',' | Should Be 'second target'
+        Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001') -PathType Container | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-002') -PathType Container | Should Be $true
     }
 
     It 'captures custom object output without replacing the result object payload' {

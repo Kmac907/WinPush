@@ -44,20 +44,27 @@ function Write-WinPushCommandOutputArtifact {
         [object[]] $Output = @(),
 
         [AllowNull()]
-        [object[]] $Errors = @()
+        [object[]] $Errors = @(),
+
+        [AllowNull()]
+        [string] $RunDirectory = $null
     )
 
     if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
         throw [System.ArgumentException]::new('OutputRoot must not be empty.')
     }
 
-    $runName = Get-Date -Format 'dd-MM-yyyy-HHmmss'
-    $runDirectory = Join-Path -Path $OutputRoot -ChildPath $runName
-    $suffix = 1
+    $runDirectory = $RunDirectory
 
-    while (Test-Path -LiteralPath $runDirectory) {
-        $runDirectory = Join-Path -Path $OutputRoot -ChildPath ('{0}-{1}' -f $runName, $suffix)
-        $suffix++
+    if ([string]::IsNullOrWhiteSpace($runDirectory)) {
+        $runName = Get-Date -Format 'dd-MM-yyyy-HHmmss'
+        $runDirectory = Join-Path -Path $OutputRoot -ChildPath $runName
+        $suffix = 1
+
+        while (Test-Path -LiteralPath $runDirectory) {
+            $runDirectory = Join-Path -Path $OutputRoot -ChildPath ('{0}-{1}' -f $runName, $suffix)
+            $suffix++
+        }
     }
 
     $computerDirectory = Join-Path -Path $runDirectory -ChildPath $ComputerName
