@@ -4,7 +4,7 @@
 
 `WinPush` is a PowerShell 7.6 script module for Windows administrators and automation engineers. The MVP will use PSRP over WinRM to test targets, run command text and local scripts, transfer individual files, and retrieve text logs from an explicit remote directory.
 
-The module currently exports the first completed public command, `Test-WinPushTarget`, for single-target PSRP connectivity checks with the current Windows identity.
+The module currently exports the first completed public command, `Test-WinPushTarget`, for single-target PSRP connectivity checks with the current Windows identity or a caller-supplied `PSCredential`.
 
 ## Scope
 
@@ -41,7 +41,7 @@ WinPush/
 
 | Command | Current behavior |
 | --- | --- |
-| `Test-WinPushTarget` | Tests PSRP session creation for one direct `-ComputerName` using the current Windows identity and returns a `WinPush.ExecutionResult`. |
+| `Test-WinPushTarget` | Tests PSRP session creation for one direct `-ComputerName` using the current Windows identity or an optional `-Credential` and returns a `WinPush.ExecutionResult`. |
 
 ## Prerequisites
 
@@ -102,7 +102,7 @@ Import-Module .\src\WinPush\WinPush.psd1 -Force
 
 `Experimental`
 
-The module foundation, result contracts, target resolution, and single-target current-identity connectivity command exist. Credentialed connectivity, multi-target connectivity, command/script execution, file transfer, and log collection are not yet implemented.
+The module foundation, result contracts, target resolution, single-target current-identity connectivity, and credential pass-through behavior exist. Live credentialed connectivity validation, multi-target connectivity, command/script execution, file transfer, and log collection are not yet implemented.
 
 ## Version
 

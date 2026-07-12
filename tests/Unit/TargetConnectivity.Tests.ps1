@@ -7,6 +7,24 @@ $script:CommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Public\Test
 . $script:ResultFactoryPath
 . $script:CommandPath
 
+function New-TestCredential {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Secret
+    )
+
+    $secureSecret = New-Object -TypeName System.Security.SecureString
+    foreach ($character in $Secret.ToCharArray()) {
+        $secureSecret.AppendChar($character)
+    }
+    $secureSecret.MakeReadOnly()
+
+    return New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList @(
+        'CONTOSO\operator',
+        $secureSecret
+    )
+}
+
 Describe 'Test-WinPushTarget' {
     BeforeEach {
         $script:NewPSSessionComputerNames = @()
@@ -14,11 +32,20 @@ Describe 'Test-WinPushTarget' {
         $script:SessionToReturn = [pscustomobject] @{ Id = 101; ComputerName = 'PC-001' }
         $script:NewPSSessionError = $null
         $script:NewPSSessionCredentialSupplied = $false
+        $script:NewPSSessionCredential = $null
     }
 
     Mock New-PSSession {
+        param(
+            [string] $ComputerName,
+            [System.Management.Automation.PSCredential] $Credential
+        )
+
         $script:NewPSSessionComputerNames += $ComputerName
         $script:NewPSSessionCredentialSupplied = $PSBoundParameters.ContainsKey('Credential')
+        if ($script:NewPSSessionCredentialSupplied) {
+            $script:NewPSSessionCredential = $Credential
+        }
 
         if ($null -ne $script:NewPSSessionError) {
             throw $script:NewPSSessionError
@@ -88,6 +115,46 @@ Describe 'Test-WinPushTarget' {
         Test-WinPushTarget -ComputerName 'PC-001' | Out-Null
 
         $script:NewPSSessionCredentialSupplied | Should Be $false
+        $null -eq $script:NewPSSessionCredential | Should Be $true
+    }
+
+    It 'passes the supplied credential object unchanged to New-PSSession' {
+        $credential = New-TestCredential -Secret 'Distinctive-3.2-Secret!'
+
+        $result = Test-WinPushTarget -ComputerName 'PC-001' -Credential $credential
+
+        $result.Succeeded | Should Be $true
+        $script:NewPSSessionCredentialSupplied | Should Be $true
+        [object]::ReferenceEquals($script:NewPSSessionCredential, $credential) | Should Be $true
+    }
+
+    It 'normalizes credential failures without leaking distinctive secret material' {
+        $secret = 'Distinctive-3.2-Secret!'
+        $credential = New-TestCredential -Secret $secret
+        $script:NewPSSessionError = "authentication failed for $secret"
+
+        $result = Test-WinPushTarget -ComputerName 'PC-001' -Credential $credential 5>&1 4>&1 3>&1
+        $diagnosticText = @(
+            $result.ErrorMessage
+            @($result.Errors)
+            @($result.Output)
+            @($result.Logs)
+        ) -join "`n"
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'PSRP session creation failed for the target with the supplied credential.'
+        $diagnosticText | Should Not Match ([regex]::Escape($secret))
+    }
+
+    It 'does not write credential secret material to diagnostic streams' {
+        $secret = 'Distinctive-3.2-Secret!'
+        $credential = New-TestCredential -Secret $secret
+
+        $diagnostics = Test-WinPushTarget -ComputerName 'PC-001' -Credential $credential 5>&1 4>&1 3>&1
+        $diagnosticText = @($diagnostics | ForEach-Object { $_ | Out-String }) -join "`n"
+
+        $diagnosticText | Should Not Match ([regex]::Escape($secret))
     }
 
     It 'rejects multiple direct targets without opening a session' {
@@ -104,9 +171,10 @@ Describe 'Test-WinPushTarget' {
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
-    It 'has no credential parameter' {
+    It 'has an optional credential parameter' {
         $command = Get-Command -Name Test-WinPushTarget
 
-        ($command.Parameters.Keys -contains 'Credential') | Should Be $false
+        ($command.Parameters.Keys -contains 'Credential') | Should Be $true
+        $command.Parameters['Credential'].ParameterType.FullName | Should Be 'System.Management.Automation.PSCredential'
     }
 }

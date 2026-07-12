@@ -3,14 +3,24 @@ function Test-WinPushTarget {
     param(
         [Parameter(Mandatory)]
         [ValidateCount(1, 1)]
-        [string[]] $ComputerName
+        [string[]] $ComputerName,
+
+        [System.Management.Automation.PSCredential] $Credential
     )
 
     $target = @(Resolve-WinPushTarget -ComputerName $ComputerName)[0]
     $session = $null
+    $sessionParameters = @{
+        ComputerName = $target
+        ErrorAction  = 'Stop'
+    }
+
+    if ($PSBoundParameters.ContainsKey('Credential')) {
+        $sessionParameters['Credential'] = $Credential
+    }
 
     try {
-        $session = New-PSSession -ComputerName $target -ErrorAction Stop
+        $session = New-PSSession @sessionParameters
 
         return New-WinPushExecutionResult `
             -ComputerName $target `
@@ -20,7 +30,12 @@ function Test-WinPushTarget {
             -ExitCode $null
     }
     catch {
-        $errorMessage = $_.Exception.Message
+        $errorMessage = if ($PSBoundParameters.ContainsKey('Credential')) {
+            'PSRP session creation failed for the target with the supplied credential.'
+        }
+        else {
+            $_.Exception.Message
+        }
 
         return New-WinPushExecutionResult `
             -ComputerName $target `
