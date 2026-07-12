@@ -147,6 +147,44 @@ Describe 'Invoke-WinPushCommand' {
         ($script:RemovedSessionIds -join ',') | Should Be '201,202,203'
     }
 
+    It 'runs pipeline ComputerName strings in resolved order without duplicate targets' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+            'PC-003' = 203
+        }
+
+        $results = @(@(' PC-001 ', 'pc-001', 'PC-002', 'PC-003') | Invoke-WinPushCommand -Command 'hostname')
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:RemovedSessionIds -join ',') | Should Be '201,202,203'
+    }
+
+    It 'runs pipeline objects with ComputerName property in resolved order without duplicate targets' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+            'PC-003' = 203
+        }
+        $pipelineTargets = @(
+            [pscustomobject] @{ ComputerName = ' PC-001 ' }
+            [pscustomobject] @{ ComputerName = 'pc-001' }
+            [pscustomobject] @{ ComputerName = 'PC-002' }
+            [pscustomobject] @{ ComputerName = 'PC-003' }
+        )
+
+        $results = @($pipelineTargets | Invoke-WinPushCommand -Command 'hostname')
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:RemovedSessionIds -join ',') | Should Be '201,202,203'
+    }
+
     It 'continues to later direct ComputerName targets after one target fails' {
         $script:SessionIdByComputerName = @{
             'PC-001' = 201
@@ -157,6 +195,28 @@ Describe 'Invoke-WinPushCommand' {
         }
 
         $results = @(Invoke-WinPushCommand -ComputerName @('PC-001', 'PC-002', 'PC-003') -Command 'hostname')
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $false
+        $results[1].ErrorMessage | Should Be 'connection failed'
+        $results[2].Succeeded | Should Be $true
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-003'
+        ($script:RemovedSessionIds -join ',') | Should Be '201,203'
+    }
+
+    It 'continues to later pipeline ComputerName targets after one target fails' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-003' = 203
+        }
+        $script:NewPSSessionErrorsByComputerName = @{
+            'PC-002' = 'connection failed'
+        }
+
+        $results = @(@('PC-001', 'PC-002', 'PC-003') | Invoke-WinPushCommand -Command 'hostname')
 
         @($results).Count | Should Be 3
         ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
@@ -200,6 +260,29 @@ Describe 'Invoke-WinPushCommand' {
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
 
         $results = @(Invoke-WinPushCommand -ComputerName @('PC-001', 'PC-002') -Command 'hostname' -CaptureOutput -OutputRoot $outputRoot)
+
+        @($results).Count | Should Be 2
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
+        $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        (Get-Content -LiteralPath $results[0].StdOutPath) -join ',' | Should Be 'first target'
+        (Get-Content -LiteralPath $results[1].StdOutPath) -join ',' | Should Be 'second target'
+        Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001') -PathType Container | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-002') -PathType Container | Should Be $true
+    }
+
+    It 'captures pipeline ComputerName output under one shared run folder' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+        $script:InvokeCommandOutputsByComputerName = @{
+            'PC-001' = @('first target')
+            'PC-002' = @('second target')
+        }
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
+
+        $results = @(@('PC-001', 'PC-002') | Invoke-WinPushCommand -Command 'hostname' -CaptureOutput -OutputRoot $outputRoot)
 
         @($results).Count | Should Be 2
         $results[0].RunDirectory | Should Be $results[1].RunDirectory
