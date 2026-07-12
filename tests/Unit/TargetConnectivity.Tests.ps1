@@ -31,6 +31,7 @@ Describe 'Test-WinPushTarget' {
         $script:RemovedSessionIds = @()
         $script:SessionToReturn = [pscustomobject] @{ Id = 101; ComputerName = 'PC-001' }
         $script:NewPSSessionError = $null
+        $script:NewPSSessionErrorsByComputerName = @{}
         $script:NewPSSessionCredentialSupplied = $false
         $script:NewPSSessionCredential = $null
     }
@@ -49,6 +50,10 @@ Describe 'Test-WinPushTarget' {
 
         if ($null -ne $script:NewPSSessionError) {
             throw $script:NewPSSessionError
+        }
+
+        if ($script:NewPSSessionErrorsByComputerName.ContainsKey($ComputerName)) {
+            throw $script:NewPSSessionErrorsByComputerName[$ComputerName]
         }
 
         return $script:SessionToReturn
@@ -169,6 +174,33 @@ Describe 'Test-WinPushTarget' {
         @($script:NewPSSessionComputerNames).Count | Should Be 2
         $script:NewPSSessionComputerNames[0] | Should Be 'PC-001'
         $script:NewPSSessionComputerNames[1] | Should Be 'PC-002'
+
+        @($script:RemovedSessionIds).Count | Should Be 2
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+        $script:RemovedSessionIds[1] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'continues processing direct targets after a target fails' {
+        $script:NewPSSessionErrorsByComputerName['PC-002'] = 'connection failed for PC-002'
+
+        $results = @(Test-WinPushTarget -ComputerName @('PC-001', 'PC-002', 'PC-003'))
+
+        @($results).Count | Should Be 3
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[1].ComputerName | Should Be 'PC-002'
+        $results[2].ComputerName | Should Be 'PC-003'
+
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $false
+        $results[2].Succeeded | Should Be $true
+        $results[1].ExitCode | Should Be 1
+        $results[1].ErrorMessage | Should Be 'connection failed for PC-002'
+        $results[1].Errors[0] | Should Be 'connection failed for PC-002'
+
+        @($script:NewPSSessionComputerNames).Count | Should Be 3
+        $script:NewPSSessionComputerNames[0] | Should Be 'PC-001'
+        $script:NewPSSessionComputerNames[1] | Should Be 'PC-002'
+        $script:NewPSSessionComputerNames[2] | Should Be 'PC-003'
 
         @($script:RemovedSessionIds).Count | Should Be 2
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id

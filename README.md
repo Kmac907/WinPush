@@ -102,7 +102,7 @@ Import-Module .\src\WinPush\WinPush.psd1 -Force
 
 `Experimental`
 
-The module foundation, result contracts, target resolution, single-target current-identity connectivity, credential pass-through behavior, and direct-array sequential connectivity checks exist. Pipeline and host-file connectivity validation, command/script execution, file transfer, and log collection are not yet implemented.
+The module foundation, result contracts, target resolution, single-target current-identity connectivity, credential pass-through behavior, and direct-array sequential connectivity checks with per-target failure isolation exist. Pipeline and host-file connectivity validation, command/script execution, file transfer, and log collection are not yet implemented.
 
 ## Version
 
