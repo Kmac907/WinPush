@@ -12,6 +12,24 @@ $script:FixtureRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -
 . $script:PsrpCommandPath
 . $script:CommandPath
 
+function New-TestCredential {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Secret
+    )
+
+    $secureSecret = New-Object -TypeName System.Security.SecureString
+    foreach ($character in $Secret.ToCharArray()) {
+        $secureSecret.AppendChar($character)
+    }
+    $secureSecret.MakeReadOnly()
+
+    return New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList @(
+        'CONTOSO\operator',
+        $secureSecret
+    )
+}
+
 Describe 'Invoke-WinPushCommand' {
     BeforeEach {
         $script:NewPSSessionComputerNames = @()
@@ -28,16 +46,24 @@ Describe 'Invoke-WinPushCommand' {
         $script:InvokeCommandOutputsByComputerName = @{}
         $script:InvokeCommandErrorsByComputerName = @{}
         $script:InvokeCommandThrowsByComputerName = @{}
+        $script:NewPSSessionCredentialSupplied = @()
+        $script:NewPSSessionCredentials = @()
     }
 
     Mock New-PSSession {
         param(
             [string] $ComputerName,
+            [System.Management.Automation.PSCredential] $Credential,
             $ErrorAction
         )
 
         $null = $ErrorAction
         $script:NewPSSessionComputerNames += $ComputerName
+        $credentialSupplied = $PSBoundParameters.ContainsKey('Credential')
+        $script:NewPSSessionCredentialSupplied += $credentialSupplied
+        if ($credentialSupplied) {
+            $script:NewPSSessionCredentials += $Credential
+        }
 
         if ($null -ne $script:NewPSSessionError) {
             throw $script:NewPSSessionError
@@ -130,6 +156,91 @@ Describe 'Invoke-WinPushCommand' {
         @($results).Count | Should Be 1
         $results[0].PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
         $results[0].Output[0] | Should Be 'remote output'
+    }
+
+    It 'has an optional credential parameter' {
+        $command = Get-Command -Name Invoke-WinPushCommand
+
+        ($command.Parameters.Keys -contains 'Credential') | Should Be $true
+        $command.Parameters['Credential'].ParameterType.FullName | Should Be 'System.Management.Automation.PSCredential'
+    }
+
+    It 'does not send a credential argument to New-PSSession when omitted' {
+        Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' | Out-Null
+
+        @($script:NewPSSessionCredentialSupplied).Count | Should Be 1
+        $script:NewPSSessionCredentialSupplied[0] | Should Be $false
+        @($script:NewPSSessionCredentials).Count | Should Be 0
+    }
+
+    It 'passes the supplied credential object unchanged for direct ComputerName targets' {
+        $credential = New-TestCredential -Secret 'Distinctive-4.3-Credential-Secret!'
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Credential $credential
+
+        $result.Succeeded | Should Be $true
+        @($script:NewPSSessionCredentials).Count | Should Be 1
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
+    }
+
+    It 'passes the supplied credential object unchanged for pipeline targets' {
+        $credential = New-TestCredential -Secret 'Distinctive-4.3-Credential-Secret!'
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+
+        $results = @(@('PC-001', 'PC-002') | Invoke-WinPushCommand -Command 'hostname' -Credential $credential)
+
+        @($results).Count | Should Be 2
+        @($script:NewPSSessionCredentials).Count | Should Be 2
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[1], $credential) | Should Be $true
+    }
+
+    It 'passes the supplied credential object unchanged for host file targets' {
+        $credential = New-TestCredential -Secret 'Distinctive-4.3-Credential-Secret!'
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'duplicate-comment-hosts.txt'
+
+        $results = @(Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname' -Credential $credential)
+
+        @($results).Count | Should Be 2
+        @($script:NewPSSessionCredentials).Count | Should Be 2
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[1], $credential) | Should Be $true
+    }
+
+    It 'normalizes credential session failures without leaking distinctive secret material' {
+        $secret = 'Distinctive-4.3-Credential-Secret!'
+        $credential = New-TestCredential -Secret $secret
+        $script:NewPSSessionError = "authentication failed for $secret"
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Credential $credential 5>&1 4>&1 3>&1
+        $diagnosticText = @(
+            $result.ErrorMessage
+            @($result.Errors)
+            @($result.Output)
+            @($result.Logs)
+        ) -join "`n"
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'PSRP command session creation failed for the target with the supplied credential.'
+        $diagnosticText | Should Not Match ([regex]::Escape($secret))
+    }
+
+    It 'preserves post-session command failures when a credential is supplied' {
+        $credential = New-TestCredential -Secret 'Distinctive-4.3-Credential-Secret!'
+        $script:InvokeCommandError = 'command invocation failed'
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Credential $credential
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'command invocation failed'
     }
 
     It 'runs direct ComputerName arrays in resolved order without duplicate targets' {
