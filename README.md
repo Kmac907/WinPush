@@ -41,7 +41,7 @@ WinPush/
 
 | Command | Current behavior |
 | --- | --- |
-| `Invoke-WinPushCommand` | Runs non-empty PowerShell command text on one direct `-ComputerName` target through PSRP and returns one `WinPush.ExecutionResult` summary. `-CaptureOutput` writes `stdout.txt` and `stderr.txt` under one timestamped `-OutputRoot` run folder for that target. |
+| `Invoke-WinPushCommand` | Runs non-empty PowerShell command text on one direct `-ComputerName` target through PSRP and returns one `WinPush.ExecutionResult` summary. Command output and command errors are preserved together; command errors set `Succeeded = $false` and `ExitCode = 1`. `-CaptureOutput` writes output to `stdout.txt` and errors to `stderr.txt` under one timestamped `-OutputRoot` run folder for that target. |
 | `Test-WinPushTarget` | Tests PSRP session creation for direct `-ComputerName`, pipeline, or `-HostFile` targets sequentially using the current Windows identity or an optional `-Credential` and returns one `WinPush.ExecutionResult` per resolved target. |
 
 ## Prerequisites

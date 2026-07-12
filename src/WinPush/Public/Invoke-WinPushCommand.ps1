@@ -31,10 +31,15 @@ function Invoke-WinPushCommand {
     try {
         $session = New-PSSession -ComputerName $target -ErrorAction Stop
         $scriptBlock = [scriptblock]::Create($Command)
-        $output = @(Invoke-WinPushPsrpCommand -Session $session -ScriptBlock $scriptBlock)
+        $commandResult = Invoke-WinPushPsrpCommand -Session $session -ScriptBlock $scriptBlock
+        $output = @($commandResult.Output)
+        $errors = @($commandResult.Errors)
+        $succeeded = $errors.Count -eq 0
+        $exitCode = if ($succeeded) { 0 } else { 1 }
+        $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
 
         if ($CaptureOutput) {
-            $artifact = Write-WinPushCommandOutputArtifact -OutputRoot $OutputRoot -ComputerName $target -Output $output
+            $artifact = Write-WinPushCommandOutputArtifact -OutputRoot $OutputRoot -ComputerName $target -Output $output -Errors $errors
             $runDirectory = $artifact.RunDirectory
             $computerDirectory = $artifact.ComputerDirectory
             $stdOutPath = $artifact.StdOutPath
@@ -45,9 +50,11 @@ function Invoke-WinPushCommand {
             -ComputerName $target `
             -Transport 'Psrp' `
             -Operation 'RunCommand' `
-            -Succeeded $true `
-            -ExitCode 0 `
+            -Succeeded $succeeded `
+            -ExitCode $exitCode `
+            -ErrorMessage $errorMessage `
             -Output $output `
+            -Errors $errors `
             -RunDirectory $runDirectory `
             -ComputerDirectory $computerDirectory `
             -StdOutPath $stdOutPath `

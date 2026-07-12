@@ -18,6 +18,7 @@ Describe 'Invoke-WinPushCommand' {
         $script:InvokedScriptBlocks = @()
         $script:SessionToReturn = [pscustomobject] @{ Id = 202; ComputerName = 'PC-001' }
         $script:InvokeCommandOutput = @('remote output')
+        $script:InvokeCommandErrors = @()
         $script:NewPSSessionError = $null
         $script:InvokeCommandError = $null
     }
@@ -51,7 +52,11 @@ Describe 'Invoke-WinPushCommand' {
             throw $script:InvokeCommandError
         }
 
-        return $script:InvokeCommandOutput
+        return [pscustomobject] [ordered] @{
+            PSTypeName = 'WinPush.PsrpCommandResult'
+            Output     = @($script:InvokeCommandOutput)
+            Errors     = @($script:InvokeCommandErrors)
+        }
     }
 
     Mock Remove-PSSession {
@@ -161,7 +166,8 @@ Describe 'Invoke-WinPushCommand' {
     }
 
     It 'captures failed command errors to stderr artifact when requested' {
-        $script:InvokeCommandError = 'command failed'
+        $script:InvokeCommandOutput = @()
+        $script:InvokeCommandErrors = @('command failed')
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
 
         $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'throw "command failed"' -CaptureOutput -OutputRoot $outputRoot
@@ -174,6 +180,34 @@ Describe 'Invoke-WinPushCommand' {
         (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'command failed'
         @($result.Errors).Count | Should Be 1
         $result.Errors[0] | Should Be 'command failed'
+    }
+
+    It 'returns command output and command errors together when both are emitted' {
+        $script:InvokeCommandOutput = @('before error')
+        $script:InvokeCommandErrors = @('command failed')
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'Write-Output "before error"; Write-Error "command failed"'
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'command failed'
+        @($result.Output).Count | Should Be 1
+        $result.Output[0] | Should Be 'before error'
+        @($result.Errors).Count | Should Be 1
+        $result.Errors[0] | Should Be 'command failed'
+    }
+
+    It 'captures command output to stdout and command errors to stderr when both are emitted' {
+        $script:InvokeCommandOutput = @('before error')
+        $script:InvokeCommandErrors = @('command failed')
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'Write-Output "before error"; Write-Error "command failed"' -CaptureOutput -OutputRoot $outputRoot
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'before error'
+        (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'command failed'
     }
 
     It 'returns an empty output array when the command emits nothing' {
