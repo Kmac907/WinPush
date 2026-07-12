@@ -2,6 +2,7 @@ $script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -C
 $script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Targeting\Resolve-WinPushTarget.ps1'
 $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushExecutionResult.ps1'
 $script:CommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Public\Test-WinPushTarget.ps1'
+$script:FixtureRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\Fixtures\TargetResolution')
 
 . $script:ResolverPath
 . $script:ResultFactoryPath
@@ -207,10 +208,110 @@ Describe 'Test-WinPushTarget' {
         $script:RemovedSessionIds[1] | Should Be $script:SessionToReturn.Id
     }
 
+    It 'processes pipeline string targets sequentially' {
+        $results = @(@(' PC-001 ', 'PC-002') | Test-WinPushTarget)
+
+        @($results).Count | Should Be 2
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[1].ComputerName | Should Be 'PC-002'
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $true
+
+        @($script:NewPSSessionComputerNames).Count | Should Be 2
+        $script:NewPSSessionComputerNames[0] | Should Be 'PC-001'
+        $script:NewPSSessionComputerNames[1] | Should Be 'PC-002'
+
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'processes pipeline objects by ComputerName property sequentially' {
+        $inputObjects = @(
+            [pscustomobject] @{ ComputerName = 'PC-001' }
+            [pscustomobject] @{ ComputerName = ' PC-002 ' }
+        )
+
+        $results = @($inputObjects | Test-WinPushTarget)
+
+        @($results).Count | Should Be 2
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[1].ComputerName | Should Be 'PC-002'
+        $script:NewPSSessionComputerNames[0] | Should Be 'PC-001'
+        $script:NewPSSessionComputerNames[1] | Should Be 'PC-002'
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'continues processing pipeline targets after a target fails' {
+        $script:NewPSSessionErrorsByComputerName['PC-002'] = 'connection failed for PC-002'
+
+        $results = @(@('PC-001', 'PC-002', 'PC-003') | Test-WinPushTarget)
+
+        @($results).Count | Should Be 3
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[1].ComputerName | Should Be 'PC-002'
+        $results[2].ComputerName | Should Be 'PC-003'
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $false
+        $results[2].Succeeded | Should Be $true
+        $results[1].ExitCode | Should Be 1
+        $results[1].ErrorMessage | Should Be 'connection failed for PC-002'
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'processes host file targets sequentially' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'duplicate-comment-hosts.txt'
+
+        $results = @(Test-WinPushTarget -HostFile $hostFile)
+
+        @($results).Count | Should Be 2
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[1].ComputerName | Should Be 'PC-002'
+        $script:NewPSSessionComputerNames[0] | Should Be 'PC-001'
+        $script:NewPSSessionComputerNames[1] | Should Be 'PC-002'
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'continues processing host file targets after a target fails' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'valid-hosts.txt'
+        $utf8Target = 'pc-utf8-{0}01' -f [char] 0x00e9
+        $script:NewPSSessionErrorsByComputerName[$utf8Target] = "connection failed for $utf8Target"
+
+        $results = @(Test-WinPushTarget -HostFile $hostFile)
+
+        @($results).Count | Should Be 3
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[1].ComputerName | Should Be $utf8Target
+        $results[2].ComputerName | Should Be 'PC-003'
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $false
+        $results[2].Succeeded | Should Be $true
+        $results[1].ExitCode | Should Be 1
+        $results[1].ErrorMessage | Should Be "connection failed for $utf8Target"
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'fails invalid host files before opening a session' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'missing-hosts.txt'
+
+        { Test-WinPushTarget -HostFile $hostFile } | Should Throw 'Host file was not found:'
+
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
     It 'has an optional credential parameter' {
         $command = Get-Command -Name Test-WinPushTarget
 
         ($command.Parameters.Keys -contains 'Credential') | Should Be $true
         $command.Parameters['Credential'].ParameterType.FullName | Should Be 'System.Management.Automation.PSCredential'
+    }
+
+    It 'accepts pipeline and host file target sources' {
+        $command = Get-Command -Name Test-WinPushTarget
+        $computerNameAttributes = @($command.Parameters['ComputerName'].Attributes | Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] })
+
+        ($command.Parameters.Keys -contains 'HostFile') | Should Be $true
+        $command.Parameters['HostFile'].ParameterType.FullName | Should Be 'System.String'
+        @($computerNameAttributes | Where-Object { $_.ValueFromPipeline }).Count | Should Be 1
+        @($computerNameAttributes | Where-Object { $_.ValueFromPipelineByPropertyName }).Count | Should Be 1
     }
 }

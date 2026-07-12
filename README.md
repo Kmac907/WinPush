@@ -4,7 +4,7 @@
 
 `WinPush` is a PowerShell 7.6 script module for Windows administrators and automation engineers. The MVP will use PSRP over WinRM to test targets, run command text and local scripts, transfer individual files, and retrieve text logs from an explicit remote directory.
 
-The module currently exports the first completed public command, `Test-WinPushTarget`, for direct-target PSRP connectivity checks with the current Windows identity or a caller-supplied `PSCredential`.
+The module currently exports the first completed public command, `Test-WinPushTarget`, for PSRP connectivity checks from direct, pipeline, or UTF-8 host-file target input with the current Windows identity or a caller-supplied `PSCredential`.
 
 ## Scope
 
@@ -41,7 +41,7 @@ WinPush/
 
 | Command | Current behavior |
 | --- | --- |
-| `Test-WinPushTarget` | Tests PSRP session creation for one or more direct `-ComputerName` values sequentially using the current Windows identity or an optional `-Credential` and returns one `WinPush.ExecutionResult` per target. |
+| `Test-WinPushTarget` | Tests PSRP session creation for direct `-ComputerName`, pipeline, or `-HostFile` targets sequentially using the current Windows identity or an optional `-Credential` and returns one `WinPush.ExecutionResult` per resolved target. |
 
 ## Prerequisites
 
@@ -102,7 +102,7 @@ Import-Module .\src\WinPush\WinPush.psd1 -Force
 
 `Experimental`
 
-The module foundation, result contracts, target resolution, single-target current-identity connectivity, credential pass-through behavior, and direct-array sequential connectivity checks with per-target failure isolation exist. Pipeline and host-file connectivity validation, command/script execution, file transfer, and log collection are not yet implemented.
+The module foundation, result contracts, target resolution, single-target current-identity connectivity, credential pass-through behavior, and sequential connectivity checks across direct, pipeline, and host-file targets with per-target failure isolation exist. Command/script execution, file transfer, and log collection are not yet implemented.
 
 ## Version
 
