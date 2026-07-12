@@ -157,18 +157,22 @@ Describe 'Test-WinPushTarget' {
         $diagnosticText | Should Not Match ([regex]::Escape($secret))
     }
 
-    It 'rejects multiple direct targets without opening a session' {
-        $threw = $false
-        try {
-            Test-WinPushTarget -ComputerName @('PC-001', 'PC-002') -ErrorAction Stop
-        }
-        catch {
-            $threw = $true
-            $_.Exception.Message | Should Match 'exactly 1|exactly one'
-        }
+    It 'processes multiple direct targets sequentially' {
+        $results = @(Test-WinPushTarget -ComputerName @(' PC-001 ', 'PC-002'))
 
-        $threw | Should Be $true
-        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($results).Count | Should Be 2
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[1].ComputerName | Should Be 'PC-002'
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $true
+
+        @($script:NewPSSessionComputerNames).Count | Should Be 2
+        $script:NewPSSessionComputerNames[0] | Should Be 'PC-001'
+        $script:NewPSSessionComputerNames[1] | Should Be 'PC-002'
+
+        @($script:RemovedSessionIds).Count | Should Be 2
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+        $script:RemovedSessionIds[1] | Should Be $script:SessionToReturn.Id
     }
 
     It 'has an optional credential parameter' {
