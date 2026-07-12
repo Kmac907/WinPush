@@ -4,7 +4,7 @@
 
 `WinPush` is a PowerShell 7.6 script module for Windows administrators and automation engineers. The MVP will use PSRP over WinRM to test targets, run command text and local scripts, transfer individual files, and retrieve text logs from an explicit remote directory.
 
-The module currently exports the first completed public command, `Test-WinPushTarget`, for PSRP connectivity checks from direct, pipeline, or UTF-8 host-file target input with the current Windows identity or a caller-supplied `PSCredential`.
+The module currently exports completed PSRP connectivity checks and a first single-target command execution path.
 
 ## Scope
 
@@ -41,6 +41,7 @@ WinPush/
 
 | Command | Current behavior |
 | --- | --- |
+| `Invoke-WinPushCommand` | Runs non-empty PowerShell command text on one direct `-ComputerName` target through PSRP and returns one `WinPush.ExecutionResult` summary. |
 | `Test-WinPushTarget` | Tests PSRP session creation for direct `-ComputerName`, pipeline, or `-HostFile` targets sequentially using the current Windows identity or an optional `-Credential` and returns one `WinPush.ExecutionResult` per resolved target. |
 
 ## Prerequisites
@@ -65,12 +66,13 @@ Get-Command -Module WinPush
 The current expected result is:
 
 ```text
+Invoke-WinPushCommand
 Test-WinPushTarget
 ```
 
 ## Output
 
-`Test-WinPushTarget` returns a structured PowerShell object with `PSTypeName = WinPush.ExecutionResult`.
+`Test-WinPushTarget` and `Invoke-WinPushCommand` return structured PowerShell objects with `PSTypeName = WinPush.ExecutionResult`.
 
 | Contract | Purpose |
 | --- | --- |
@@ -102,7 +104,7 @@ Import-Module .\src\WinPush\WinPush.psd1 -Force
 
 `Experimental`
 
-The module foundation, result contracts, target resolution, single-target current-identity connectivity, credential pass-through behavior, and sequential connectivity checks across direct, pipeline, and host-file targets with per-target failure isolation exist. Command/script execution, file transfer, and log collection are not yet implemented.
+The module foundation, result contracts, target resolution, connectivity checks across direct, pipeline, and host-file targets, credential pass-through behavior, and single-target command summary execution exist. Capture-output artifacts, command error-stream semantics, multi-target command execution, script execution, file transfer, and log collection are not yet implemented.
 
 ## Version
 

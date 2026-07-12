@@ -10,6 +10,7 @@
     CompatiblePSEditions = @('Core')
 
     FunctionsToExport    = @(
+        'Invoke-WinPushCommand',
         'Test-WinPushTarget'
     )
     CmdletsToExport      = @()
