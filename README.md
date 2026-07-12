@@ -4,7 +4,7 @@
 
 `WinPush` is a PowerShell 7.6 script module for Windows administrators and automation engineers. The MVP will use PSRP over WinRM to test targets, run command text and local scripts, transfer individual files, and retrieve text logs from an explicit remote directory.
 
-The module currently exports completed PSRP connectivity checks and `Invoke-WinPushCommand` execution for direct or pipeline `-ComputerName` targets with optional captured-output artifacts.
+The module currently exports completed PSRP connectivity checks and `Invoke-WinPushCommand` execution for direct, pipeline, or host-file targets with optional captured-output artifacts.
 
 ## Scope
 
@@ -41,7 +41,7 @@ WinPush/
 
 | Command | Current behavior |
 | --- | --- |
-| `Invoke-WinPushCommand` | Runs non-empty PowerShell command text on direct `-ComputerName`, pipeline string, or pipeline-by-property-name `ComputerName` targets through PSRP sequentially and returns one `WinPush.ExecutionResult` summary per resolved target. Command output and command errors are preserved together; command errors set `Succeeded = $false` and `ExitCode = 1`. `-CaptureOutput` writes output to `stdout.txt` and errors to `stderr.txt` under one shared timestamped `-OutputRoot` run folder with one child folder per target. |
+| `Invoke-WinPushCommand` | Runs non-empty PowerShell command text on direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP sequentially and returns one `WinPush.ExecutionResult` summary per resolved target. Command output and command errors are preserved together; command errors set `Succeeded = $false` and `ExitCode = 1`. `-CaptureOutput` writes output to `stdout.txt` and errors to `stderr.txt` under one shared timestamped `-OutputRoot` run folder with one child folder per target. |
 | `Test-WinPushTarget` | Tests PSRP session creation for direct `-ComputerName`, pipeline, or `-HostFile` targets sequentially using the current Windows identity or an optional `-Credential` and returns one `WinPush.ExecutionResult` per resolved target. |
 
 ## Prerequisites
@@ -104,7 +104,7 @@ Import-Module .\src\WinPush\WinPush.psd1 -Force
 
 `Experimental`
 
-The module foundation, result contracts, target resolution, connectivity checks across direct, pipeline, and host-file targets, credential pass-through behavior, direct and pipeline target command summary execution, command error-stream semantics, and command capture-output artifacts exist. Host-file command targeting, credential command execution, cmd.exe/native command wrapping, script execution, file transfer, and log collection are not yet implemented.
+The module foundation, result contracts, target resolution, connectivity checks across direct, pipeline, and host-file targets, credential pass-through behavior, direct, pipeline, and host-file target command summary execution, command error-stream semantics, and command capture-output artifacts exist. Credential command execution, cmd.exe/native command wrapping, script execution, file transfer, and log collection are not yet implemented.
 
 ## Version
 

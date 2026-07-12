@@ -1,9 +1,12 @@
 function Invoke-WinPushCommand {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName = 'ComputerName')]
     param(
-        [Parameter(Mandatory, Position = 0, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [Parameter(Mandatory, ParameterSetName = 'ComputerName', Position = 0, ValueFromPipeline, ValueFromPipelineByPropertyName)]
         [AllowNull()]
         [string[]] $ComputerName,
+
+        [Parameter(Mandatory, ParameterSetName = 'HostFile')]
+        [string] $HostFile,
 
         [Parameter(Mandatory, Position = 1)]
         [string] $Command,
@@ -26,13 +29,21 @@ function Invoke-WinPushCommand {
     }
 
     process {
-        foreach ($target in @($ComputerName)) {
-            $computerNames.Add($target)
+        if ($PSCmdlet.ParameterSetName -eq 'ComputerName') {
+            foreach ($target in @($ComputerName)) {
+                $computerNames.Add($target)
+            }
         }
     }
 
     end {
-        $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
+        if ($PSCmdlet.ParameterSetName -eq 'HostFile') {
+            $targets = @(Resolve-WinPushTarget -HostFile $HostFile)
+        }
+        else {
+            $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
+        }
+
         $sharedRunDirectory = $null
 
         foreach ($target in $targets) {

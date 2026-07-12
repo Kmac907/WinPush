@@ -4,6 +4,7 @@ $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Priva
 $script:ArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
 $script:PsrpCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Invoke-WinPushPsrpCommand.ps1'
 $script:CommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Public\Invoke-WinPushCommand.ps1'
+$script:FixtureRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\Fixtures\TargetResolution')
 
 . $script:ResolverPath
 . $script:ResultFactoryPath
@@ -229,6 +230,46 @@ Describe 'Invoke-WinPushCommand' {
         ($script:RemovedSessionIds -join ',') | Should Be '201,203'
     }
 
+    It 'runs host file targets in resolved order without duplicate targets or comments' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'duplicate-comment-hosts.txt'
+
+        $results = @(Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname')
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        ($script:RemovedSessionIds -join ',') | Should Be '201,202'
+    }
+
+    It 'continues to later host file targets after one target fails' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'valid-hosts.txt'
+        $utf8Target = 'pc-utf8-{0}01' -f [char] 0x00e9
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-003' = 203
+        }
+        $script:NewPSSessionErrorsByComputerName = @{
+            $utf8Target = "connection failed for $utf8Target"
+        }
+
+        $results = @(Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname')
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be "PC-001,$utf8Target,PC-003"
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $false
+        $results[1].ErrorMessage | Should Be "connection failed for $utf8Target"
+        $results[2].Succeeded | Should Be $true
+        ($script:NewPSSessionComputerNames -join ',') | Should Be "PC-001,$utf8Target,PC-003"
+        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-003'
+        ($script:RemovedSessionIds -join ',') | Should Be '201,203'
+    }
+
     It 'captures command output to one target artifact folder when requested' {
         $script:InvokeCommandOutput = @('first line', 'second line')
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
@@ -283,6 +324,30 @@ Describe 'Invoke-WinPushCommand' {
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
 
         $results = @(@('PC-001', 'PC-002') | Invoke-WinPushCommand -Command 'hostname' -CaptureOutput -OutputRoot $outputRoot)
+
+        @($results).Count | Should Be 2
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
+        $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        (Get-Content -LiteralPath $results[0].StdOutPath) -join ',' | Should Be 'first target'
+        (Get-Content -LiteralPath $results[1].StdOutPath) -join ',' | Should Be 'second target'
+        Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001') -PathType Container | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-002') -PathType Container | Should Be $true
+    }
+
+    It 'captures host file target output under one shared run folder' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+        $script:InvokeCommandOutputsByComputerName = @{
+            'PC-001' = @('first target')
+            'PC-002' = @('second target')
+        }
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'duplicate-comment-hosts.txt'
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
+
+        $results = @(Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname' -CaptureOutput -OutputRoot $outputRoot)
 
         @($results).Count | Should Be 2
         $results[0].RunDirectory | Should Be $results[1].RunDirectory
@@ -403,6 +468,15 @@ Describe 'Invoke-WinPushCommand' {
 
     It 'rejects whitespace output root before opening a session when capture output is requested' {
         { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -CaptureOutput -OutputRoot '   ' } | Should Throw 'OutputRoot must not be empty.'
+
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
+    It 'rejects invalid host files before opening a session' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'missing-hosts.txt'
+
+        { Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname' } | Should Throw 'Host file was not found:'
 
         @($script:NewPSSessionComputerNames).Count | Should Be 0
         @($script:RemovedSessionIds).Count | Should Be 0
