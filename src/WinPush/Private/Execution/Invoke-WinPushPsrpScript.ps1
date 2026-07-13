@@ -12,11 +12,12 @@ function Invoke-WinPushPsrpScript {
     $output = @()
 
     try {
-        $output = @(Invoke-Command `
+        $null = Invoke-Command `
                 -Session $Session `
                 -FilePath $FilePath `
+                -OutVariable output `
                 -ErrorVariable invokeErrors `
-                -ErrorAction SilentlyContinue)
+                -ErrorAction SilentlyContinue
     }
     catch {
         $invokeErrors += $_

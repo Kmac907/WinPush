@@ -99,6 +99,68 @@ Describe 'Invoke-WinPushScript' {
         $results[0].Output[0] | Should Be 'script output'
     }
 
+    It 'preserves object output inside the script result' {
+        $script:InvokeScriptOutput = @(
+            [pscustomobject] @{
+                Name  = 'Widget'
+                Count = 2
+            }
+        )
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript
+
+        @($result.Output).Count | Should Be 1
+        $result.Output[0].Name | Should Be 'Widget'
+        $result.Output[0].Count | Should Be 2
+        @($result.Errors).Count | Should Be 0
+    }
+
+    It 'retains script output when script errors are present' {
+        $script:InvokeScriptOutput = @('before error', 'after error')
+        $script:InvokeScriptErrors = @('script failed')
+
+        $results = @(Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript)
+
+        @($results).Count | Should Be 1
+        $result = $results[0]
+        $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'script failed'
+        @($result.Output).Count | Should Be 2
+        $result.Output[0] | Should Be 'before error'
+        $result.Output[1] | Should Be 'after error'
+        @($result.Errors).Count | Should Be 1
+        $result.Errors[0] | Should Be 'script failed'
+    }
+
+    It 'returns a failed result for a terminating script error without discarding prior output' {
+        $script:InvokeScriptOutput = @('before throw')
+        $script:InvokeScriptErrors = @('terminating script failed')
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'terminating script failed'
+        @($result.Output).Count | Should Be 1
+        $result.Output[0] | Should Be 'before throw'
+        @($result.Errors).Count | Should Be 1
+        $result.Errors[0] | Should Be 'terminating script failed'
+    }
+
+    It 'does not emit raw script errors as separate pipeline records' {
+        $script:InvokeScriptOutput = @('kept output')
+        $script:InvokeScriptErrors = @('kept error')
+
+        $results = @(Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript 2>&1)
+
+        @($results).Count | Should Be 1
+        $results[0].PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
+        $results[0].Output[0] | Should Be 'kept output'
+        $results[0].Errors[0] | Should Be 'kept error'
+    }
+
     It 'captures script output to one target artifact folder when requested' {
         $script:InvokeScriptOutput = @('first line', 'second line')
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
@@ -150,6 +212,26 @@ Describe 'Invoke-WinPushScript' {
         $result.ExitCode | Should Be 1
         $result.ErrorMessage | Should Be 'script failed'
         (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'script failed'
+    }
+
+    It 'captures retained script output to stdout and script errors to stderr when both are present' {
+        $script:InvokeScriptOutput = @('first output', 'second output')
+        $script:InvokeScriptErrors = @('first error', 'second error')
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
+
+        $results = @(Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -CaptureOutput -OutputRoot $outputRoot 2>&1)
+
+        @($results).Count | Should Be 1
+        $result = $results[0]
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'first error'
+        $result.Output[0] | Should Be 'first output'
+        $result.Output[1] | Should Be 'second output'
+        $result.Errors[0] | Should Be 'first error'
+        $result.Errors[1] | Should Be 'second error'
+        (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'first output,second output'
+        (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'first error,second error'
     }
 
     It 'rejects a missing script path before opening a session' {
@@ -228,5 +310,7 @@ Describe 'Invoke-WinPushPsrpScript' {
         $source | Should Match ([regex]::Escape('Invoke-Command `'))
         $source | Should Match ([regex]::Escape('-Session $Session'))
         $source | Should Match ([regex]::Escape('-FilePath $FilePath'))
+        $source | Should Match ([regex]::Escape('-OutVariable output'))
     }
+
 }
