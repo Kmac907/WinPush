@@ -11,6 +11,7 @@
 
     FunctionsToExport    = @(
         'Invoke-WinPushCommand',
+        'Invoke-WinPushScript',
         'Test-WinPushTarget'
     )
     CmdletsToExport      = @()

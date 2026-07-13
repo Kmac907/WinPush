@@ -5,8 +5,8 @@ Describe 'WinPush module import foundation' {
     It 'uses an explicit manifest export list' {
         $manifest = Import-PowerShellDataFile -LiteralPath $script:ManifestPath
 
-        @($manifest.FunctionsToExport).Count | Should Be 2
-        ($manifest.FunctionsToExport -join ',') | Should Be 'Invoke-WinPushCommand,Test-WinPushTarget'
+        @($manifest.FunctionsToExport).Count | Should Be 3
+        ($manifest.FunctionsToExport -join ',') | Should Be 'Invoke-WinPushCommand,Invoke-WinPushScript,Test-WinPushTarget'
         ($manifest.FunctionsToExport -notcontains '*') | Should Be $true
     }
 
