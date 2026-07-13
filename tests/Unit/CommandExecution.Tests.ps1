@@ -150,6 +150,34 @@ Describe 'Invoke-WinPushCommand' {
         $script:InvokedScriptBlocks[0] | Should Be 'Get-Date'
     }
 
+    It 'passes explicit cmd.exe command text through unchanged as PowerShell source' {
+        $commandText = 'cmd.exe /d /s /c "echo winpush"'
+
+        Invoke-WinPushCommand -ComputerName 'PC-001' -Command $commandText | Out-Null
+
+        @($script:NewPSSessionComputerNames).Count | Should Be 1
+        $script:NewPSSessionComputerNames[0] | Should Be 'PC-001'
+        @($script:InvokedScriptBlocks).Count | Should Be 1
+        $script:InvokedScriptBlocks[0] | Should Be $commandText
+    }
+
+    It 'keeps explicit cmd.exe errors in the standard command result' {
+        $commandText = 'cmd.exe /d /s /c "echo cmd failed 1>&2"'
+        $script:InvokeCommandOutput = @()
+        $script:InvokeCommandErrors = @('cmd failed')
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command $commandText
+
+        @($script:InvokedScriptBlocks).Count | Should Be 1
+        $script:InvokedScriptBlocks[0] | Should Be $commandText
+        $result.Transport | Should Be 'Psrp'
+        $result.Operation | Should Be 'RunCommand'
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'cmd failed'
+        $result.Errors[0] | Should Be 'cmd failed'
+    }
+
     It 'does not emit raw command output as separate pipeline objects' {
         $results = @(Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'Write-Output "remote output"')
 

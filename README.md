@@ -41,7 +41,7 @@ WinPush/
 
 | Command | Current behavior |
 | --- | --- |
-| `Invoke-WinPushCommand` | Runs non-empty PowerShell command text on direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP sequentially using the current Windows identity or an optional `-Credential`, and returns one `WinPush.ExecutionResult` summary per resolved target. Command output and command errors are preserved together; command errors set `Succeeded = $false` and `ExitCode = 1`. `-CaptureOutput` writes output to `stdout.txt` and errors to `stderr.txt` under one shared timestamped `-OutputRoot` run folder with one child folder per target. |
+| `Invoke-WinPushCommand` | Runs non-empty PowerShell command text on direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP sequentially using the current Windows identity or an optional `-Credential`, and returns one `WinPush.ExecutionResult` summary per resolved target. Explicit command-shell invocations such as `cmd.exe /d /s /c "echo winpush"` are accepted as caller-supplied PowerShell command text; WinPush does not add automatic `cmd.exe` wrapping. Command output and command errors are preserved together; command errors set `Succeeded = $false` and `ExitCode = 1`. `-CaptureOutput` writes output to `stdout.txt` and errors to `stderr.txt` under one shared timestamped `-OutputRoot` run folder with one child folder per target. |
 | `Test-WinPushTarget` | Tests PSRP session creation for direct `-ComputerName`, pipeline, or `-HostFile` targets sequentially using the current Windows identity or an optional `-Credential` and returns one `WinPush.ExecutionResult` per resolved target. |
 
 ## Prerequisites
@@ -104,7 +104,7 @@ Import-Module .\src\WinPush\WinPush.psd1 -Force
 
 `Experimental`
 
-The module foundation, result contracts, target resolution, connectivity checks across direct, pipeline, and host-file targets, credential pass-through behavior, direct, pipeline, and host-file target command summary execution with credential support, command error-stream semantics, and command capture-output artifacts exist. cmd.exe/native command wrapping, script execution, file transfer, and log collection are not yet implemented.
+The module foundation, result contracts, target resolution, connectivity checks across direct, pipeline, and host-file targets, credential pass-through behavior, direct, pipeline, and host-file target command summary execution with credential support, explicit cmd.exe command text through PSRP, command error-stream semantics, and command capture-output artifacts exist. Automatic cmd.exe wrapping, native command transports, script execution, file transfer, and log collection are not yet implemented.
 
 ## Version
 
