@@ -52,6 +52,7 @@ function Invoke-WinPushCommand {
             $session = $null
             $runDirectory = $null
             $computerDirectory = $null
+            $resultPath = $null
             $stdOutPath = $null
             $stdErrPath = $null
             $sessionParameters = @{
@@ -74,10 +75,21 @@ function Invoke-WinPushCommand {
                 $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
 
                 if ($CaptureOutput) {
-                    $artifact = Write-WinPushCommandOutputArtifact -OutputRoot $OutputRoot -ComputerName $target -Output $output -Errors $errors -RunDirectory $sharedRunDirectory
+                    $artifact = Write-WinPushCommandOutputArtifact `
+                        -OutputRoot $OutputRoot `
+                        -ComputerName $target `
+                        -Output $output `
+                        -Errors $errors `
+                        -RunDirectory $sharedRunDirectory `
+                        -Operation 'RunCommand' `
+                        -Transport 'Psrp' `
+                        -Succeeded $succeeded `
+                        -ExitCode $exitCode `
+                        -ErrorMessage $errorMessage
                     $sharedRunDirectory = $artifact.RunDirectory
                     $runDirectory = $artifact.RunDirectory
                     $computerDirectory = $artifact.ComputerDirectory
+                    $resultPath = $artifact.ResultPath
                     $stdOutPath = $artifact.StdOutPath
                     $stdErrPath = $artifact.StdErrPath
                 }
@@ -93,6 +105,7 @@ function Invoke-WinPushCommand {
                     -Errors $errors `
                     -RunDirectory $runDirectory `
                     -ComputerDirectory $computerDirectory `
+                    -ResultPath $resultPath `
                     -StdOutPath $stdOutPath `
                     -StdErrPath $stdErrPath
             }
@@ -105,10 +118,20 @@ function Invoke-WinPushCommand {
                 }
 
                 if ($CaptureOutput) {
-                    $artifact = Write-WinPushCommandOutputArtifact -OutputRoot $OutputRoot -ComputerName $target -Errors $errorMessage -RunDirectory $sharedRunDirectory
+                    $artifact = Write-WinPushCommandOutputArtifact `
+                        -OutputRoot $OutputRoot `
+                        -ComputerName $target `
+                        -Errors $errorMessage `
+                        -RunDirectory $sharedRunDirectory `
+                        -Operation 'RunCommand' `
+                        -Transport 'Psrp' `
+                        -Succeeded $false `
+                        -ExitCode 1 `
+                        -ErrorMessage $errorMessage
                     $sharedRunDirectory = $artifact.RunDirectory
                     $runDirectory = $artifact.RunDirectory
                     $computerDirectory = $artifact.ComputerDirectory
+                    $resultPath = $artifact.ResultPath
                     $stdOutPath = $artifact.StdOutPath
                     $stdErrPath = $artifact.StdErrPath
                 }
@@ -123,6 +146,7 @@ function Invoke-WinPushCommand {
                     -Errors $errorMessage `
                     -RunDirectory $runDirectory `
                     -ComputerDirectory $computerDirectory `
+                    -ResultPath $resultPath `
                     -StdOutPath $stdOutPath `
                     -StdErrPath $stdErrPath
             }

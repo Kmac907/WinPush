@@ -43,6 +43,7 @@ function Invoke-WinPushScript {
         $session = $null
         $runDirectory = $null
         $computerDirectory = $null
+        $resultPath = $null
         $stdOutPath = $null
         $stdErrPath = $null
 
@@ -56,9 +57,19 @@ function Invoke-WinPushScript {
             $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
 
             if ($CaptureOutput) {
-                $artifact = Write-WinPushCommandOutputArtifact -OutputRoot $OutputRoot -ComputerName $target -Output $output -Errors $errors
+                $artifact = Write-WinPushCommandOutputArtifact `
+                    -OutputRoot $OutputRoot `
+                    -ComputerName $target `
+                    -Output $output `
+                    -Errors $errors `
+                    -Operation 'RunScript' `
+                    -Transport 'Psrp' `
+                    -Succeeded $succeeded `
+                    -ExitCode $exitCode `
+                    -ErrorMessage $errorMessage
                 $runDirectory = $artifact.RunDirectory
                 $computerDirectory = $artifact.ComputerDirectory
+                $resultPath = $artifact.ResultPath
                 $stdOutPath = $artifact.StdOutPath
                 $stdErrPath = $artifact.StdErrPath
             }
@@ -74,6 +85,7 @@ function Invoke-WinPushScript {
                 -Errors $errors `
                 -RunDirectory $runDirectory `
                 -ComputerDirectory $computerDirectory `
+                -ResultPath $resultPath `
                 -StdOutPath $stdOutPath `
                 -StdErrPath $stdErrPath
         }
@@ -81,9 +93,18 @@ function Invoke-WinPushScript {
             $errorMessage = $_.Exception.Message
 
             if ($CaptureOutput) {
-                $artifact = Write-WinPushCommandOutputArtifact -OutputRoot $OutputRoot -ComputerName $target -Errors $errorMessage
+                $artifact = Write-WinPushCommandOutputArtifact `
+                    -OutputRoot $OutputRoot `
+                    -ComputerName $target `
+                    -Errors $errorMessage `
+                    -Operation 'RunScript' `
+                    -Transport 'Psrp' `
+                    -Succeeded $false `
+                    -ExitCode 1 `
+                    -ErrorMessage $errorMessage
                 $runDirectory = $artifact.RunDirectory
                 $computerDirectory = $artifact.ComputerDirectory
+                $resultPath = $artifact.ResultPath
                 $stdOutPath = $artifact.StdOutPath
                 $stdErrPath = $artifact.StdErrPath
             }
@@ -98,6 +119,7 @@ function Invoke-WinPushScript {
                 -Errors $errorMessage `
                 -RunDirectory $runDirectory `
                 -ComputerDirectory $computerDirectory `
+                -ResultPath $resultPath `
                 -StdOutPath $stdOutPath `
                 -StdErrPath $stdErrPath
         }

@@ -418,10 +418,33 @@ Describe 'Invoke-WinPushCommand' {
         $result.Succeeded | Should Be $true
         $result.RunDirectory.StartsWith($outputRoot) | Should Be $true
         $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt')
         $result.StdOutPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt')
         $result.StdErrPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt')
+        Test-Path -LiteralPath $result.ResultPath -PathType Leaf | Should Be $true
         Test-Path -LiteralPath $result.StdOutPath -PathType Leaf | Should Be $true
         Test-Path -LiteralPath $result.StdErrPath -PathType Leaf | Should Be $true
+        $resultText = Get-Content -LiteralPath $result.ResultPath -Raw
+        $resultText | Should Match 'ComputerName : PC-001'
+        $resultText | Should Match 'Operation    : RunCommand'
+        $resultText | Should Match 'Transport    : Psrp'
+        $resultText | Should Match 'Succeeded    : True'
+        $resultText | Should Match 'ExitCode     : 0'
+        $resultText | Should Match 'StdOutPath'
+        $resultText | Should Match 'StdErrPath'
+        $resultText | Should Match 'ErrorMessage:'
+        $summaryPath = Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'
+        Test-Path -LiteralPath $summaryPath -PathType Leaf | Should Be $true
+        $summaryRows = @(Import-Csv -LiteralPath $summaryPath)
+        @($summaryRows).Count | Should Be 1
+        $summaryRows[0].ComputerName | Should Be 'PC-001'
+        $summaryRows[0].Operation | Should Be 'RunCommand'
+        $summaryRows[0].Transport | Should Be 'Psrp'
+        $summaryRows[0].Succeeded | Should Be 'True'
+        $summaryRows[0].ExitCode | Should Be '0'
+        $summaryRows[0].ResultPath | Should Be $result.ResultPath
+        $summaryRows[0].StdOutPath | Should Be $result.StdOutPath
+        $summaryRows[0].StdErrPath | Should Be $result.StdErrPath
         (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'first line,second line'
         @(Get-Content -LiteralPath $result.StdErrPath).Count | Should Be 0
         @($result.Output).Count | Should Be 2
@@ -445,10 +468,18 @@ Describe 'Invoke-WinPushCommand' {
         $results[0].RunDirectory | Should Be $results[1].RunDirectory
         $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
         $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        $results[0].ResultPath | Should Be (Join-Path -Path $results[0].ComputerDirectory -ChildPath 'result.txt')
+        $results[1].ResultPath | Should Be (Join-Path -Path $results[1].ComputerDirectory -ChildPath 'result.txt')
         (Get-Content -LiteralPath $results[0].StdOutPath) -join ',' | Should Be 'first target'
         (Get-Content -LiteralPath $results[1].StdOutPath) -join ',' | Should Be 'second target'
         Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001') -PathType Container | Should Be $true
         Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-002') -PathType Container | Should Be $true
+        Test-Path -LiteralPath $results[0].ResultPath -PathType Leaf | Should Be $true
+        Test-Path -LiteralPath $results[1].ResultPath -PathType Leaf | Should Be $true
+        $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'summary.csv'))
+        @($summaryRows).Count | Should Be 2
+        ($summaryRows.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($summaryRows.ResultPath -join ',') | Should Be (($results[0].ResultPath, $results[1].ResultPath) -join ',')
     }
 
     It 'captures pipeline ComputerName output under one shared run folder' {

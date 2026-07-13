@@ -108,10 +108,33 @@ Describe 'Invoke-WinPushScript' {
         $result.Succeeded | Should Be $true
         $result.RunDirectory.StartsWith($outputRoot) | Should Be $true
         $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt')
         $result.StdOutPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt')
         $result.StdErrPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt')
+        Test-Path -LiteralPath $result.ResultPath -PathType Leaf | Should Be $true
         Test-Path -LiteralPath $result.StdOutPath -PathType Leaf | Should Be $true
         Test-Path -LiteralPath $result.StdErrPath -PathType Leaf | Should Be $true
+        $resultText = Get-Content -LiteralPath $result.ResultPath -Raw
+        $resultText | Should Match 'ComputerName : PC-001'
+        $resultText | Should Match 'Operation    : RunScript'
+        $resultText | Should Match 'Transport    : Psrp'
+        $resultText | Should Match 'Succeeded    : True'
+        $resultText | Should Match 'ExitCode     : 0'
+        $resultText | Should Match 'StdOutPath'
+        $resultText | Should Match 'StdErrPath'
+        $resultText | Should Match 'ErrorMessage:'
+        $summaryPath = Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'
+        Test-Path -LiteralPath $summaryPath -PathType Leaf | Should Be $true
+        $summaryRows = @(Import-Csv -LiteralPath $summaryPath)
+        @($summaryRows).Count | Should Be 1
+        $summaryRows[0].ComputerName | Should Be 'PC-001'
+        $summaryRows[0].Operation | Should Be 'RunScript'
+        $summaryRows[0].Transport | Should Be 'Psrp'
+        $summaryRows[0].Succeeded | Should Be 'True'
+        $summaryRows[0].ExitCode | Should Be '0'
+        $summaryRows[0].ResultPath | Should Be $result.ResultPath
+        $summaryRows[0].StdOutPath | Should Be $result.StdOutPath
+        $summaryRows[0].StdErrPath | Should Be $result.StdErrPath
         (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'first line,second line'
         @(Get-Content -LiteralPath $result.StdErrPath).Count | Should Be 0
     }
