@@ -1,7 +1,8 @@
 function Invoke-WinPushScript {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory, Position = 0)]
+        [Parameter(Mandatory, Position = 0, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [AllowNull()]
         [string[]] $ComputerName,
 
         [Parameter(Mandatory, Position = 1)]
@@ -35,10 +36,17 @@ function Invoke-WinPushScript {
         }
 
         $resolvedScriptPath = $scriptItem.FullName
+        $computerNames = [System.Collections.Generic.List[string]]::new()
+    }
+
+    process {
+        foreach ($target in @($ComputerName)) {
+            $computerNames.Add($target)
+        }
     }
 
     end {
-        $targets = @(Resolve-WinPushTarget -ComputerName @($ComputerName))
+        $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
         $sharedRunDirectory = $null
 
         foreach ($target in $targets) {
