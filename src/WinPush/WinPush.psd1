@@ -11,6 +11,7 @@
 
     FunctionsToExport    = @(
         'Copy-WinPushItem',
+        'Get-WinPushLog',
         'Invoke-WinPushCommand',
         'Invoke-WinPushScript',
         'Test-WinPushTarget'
