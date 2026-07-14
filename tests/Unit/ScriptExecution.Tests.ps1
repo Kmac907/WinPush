@@ -177,6 +177,31 @@ Describe 'Invoke-WinPushScript' {
         ($script:RemovedSessionIds -join ',') | Should Be '301,302,303'
     }
 
+    It 'runs HostFile targets in resolved order without duplicate targets' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 301
+            'PC-002' = 302
+            'PC-003' = 303
+        }
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'hosts.txt'
+        @(
+            ' PC-001 '
+            'pc-001'
+            '# ignored comment'
+            ''
+            'PC-002'
+            'PC-003'
+        ) | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+
+        $results = @(Invoke-WinPushScript -HostFile $hostFile -ScriptPath $script:FixtureScript)
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:RemovedSessionIds -join ',') | Should Be '301,302,303'
+    }
+
     It 'continues to later direct ComputerName targets after one target fails' {
         $script:SessionIdByComputerName = @{
             'PC-001' = 301
@@ -209,6 +234,30 @@ Describe 'Invoke-WinPushScript' {
         }
 
         $results = @(@('PC-001', 'PC-002', 'PC-003') | Invoke-WinPushScript -ScriptPath $script:FixtureScript)
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $false
+        $results[1].ErrorMessage | Should Be 'connection failed'
+        $results[2].Succeeded | Should Be $true
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-003'
+        ($script:RemovedSessionIds -join ',') | Should Be '301,303'
+    }
+
+    It 'continues to later HostFile targets after one target fails' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 301
+            'PC-003' = 303
+        }
+        $script:NewPSSessionErrorsByComputerName = @{
+            'PC-002' = 'connection failed'
+        }
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'hosts.txt'
+        @('PC-001', 'PC-002', 'PC-003') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+
+        $results = @(Invoke-WinPushScript -HostFile $hostFile -ScriptPath $script:FixtureScript)
 
         @($results).Count | Should Be 3
         ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
@@ -386,6 +435,36 @@ Describe 'Invoke-WinPushScript' {
         Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-002') -PathType Container | Should Be $true
     }
 
+    It 'captures HostFile output under one shared run folder' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 301
+            'PC-002' = 302
+        }
+        $script:InvokeScriptOutputsByComputerName = @{
+            'PC-001' = @('first target')
+            'PC-002' = @('second target')
+        }
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'hosts.txt'
+        @('PC-001', 'PC-002') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
+
+        $results = @(Invoke-WinPushScript -HostFile $hostFile -ScriptPath $script:FixtureScript -CaptureOutput -OutputRoot $outputRoot)
+
+        @($results).Count | Should Be 2
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
+        $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        (Get-Content -LiteralPath $results[0].StdOutPath) -join ',' | Should Be 'first target'
+        (Get-Content -LiteralPath $results[1].StdOutPath) -join ',' | Should Be 'second target'
+        Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001') -PathType Container | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-002') -PathType Container | Should Be $true
+        $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'summary.csv'))
+        @($summaryRows).Count | Should Be 2
+        ($summaryRows.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($summaryRows.Operation -join ',') | Should Be 'RunScript,RunScript'
+        ($summaryRows.ResultPath -join ',') | Should Be (($results[0].ResultPath, $results[1].ResultPath) -join ',')
+    }
+
     It 'captures script errors to stderr artifact when requested' {
         $script:InvokeScriptOutput = @()
         $script:InvokeScriptErrors = @('script failed')
@@ -459,6 +538,15 @@ Describe 'Invoke-WinPushScript' {
         @($script:RemovedSessionIds).Count | Should Be 0
     }
 
+    It 'rejects a missing host file before opening a session' {
+        $missingHostFile = Join-Path -Path $TestDrive -ChildPath 'missing-hosts.txt'
+
+        { Invoke-WinPushScript -HostFile $missingHostFile -ScriptPath $script:FixtureScript } | Should Throw 'Host file was not found:'
+
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
     It 'removes the created session after script execution' {
         Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript | Out-Null
 
@@ -485,6 +573,14 @@ Describe 'Invoke-WinPushScript' {
         ($command.Parameters.Keys -contains 'ArgumentList') | Should Be $false
         ($command.Parameters.Keys -contains 'ScriptArgument') | Should Be $false
         ($command.Parameters.Keys -contains 'Parameters') | Should Be $false
+    }
+
+    It 'exposes HostFile without adding credential support' {
+        $command = Get-Command -Name Invoke-WinPushScript
+
+        ($command.Parameters.Keys -contains 'HostFile') | Should Be $true
+        $command.Parameters['HostFile'].ParameterType.FullName | Should Be 'System.String'
+        ($command.Parameters.Keys -contains 'Credential') | Should Be $false
     }
 }
 
