@@ -365,6 +365,24 @@ Describe 'Copy-WinPushItem' {
         $script:RemovedSessionIds[0] | Should Be 602
     }
 
+    It 'returns the approved failed upload result envelope without credential fields' {
+        $script:CopyError = 'remote upload failed'
+        $credential = Get-TestCredential -Secret 'Distinctive-6.3-Upload-Secret!'
+
+        $result = Copy-WinPushItem -ComputerName $script:TargetName -Path $script:FixtureFile -Destination 'C:\Remote\fixture.txt' -Credential $credential
+        $propertyNames = @($result.PSObject.Properties.Name)
+
+        $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
+        $result.ComputerName | Should Be 'PC-001'
+        $result.Operation | Should Be 'CopyFile'
+        $result.Transport | Should Be 'Psrp'
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'remote upload failed'
+        $result.Errors[0] | Should Be 'remote upload failed'
+        ($propertyNames -match 'Credential|Password|Secret').Count | Should Be 0
+    }
+
     It 'returns a failed result when the download copy fails and cleans up the session' {
         $script:CopyError = 'remote source was not found'
         $downloadDestination = Join-Path -Path $TestDrive -ChildPath 'downloaded.txt'
@@ -377,6 +395,25 @@ Describe 'Copy-WinPushItem' {
         $result.Errors[0] | Should Be 'remote source was not found'
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be 602
+    }
+
+    It 'returns the approved failed download result envelope without credential fields' {
+        $script:CopyError = 'remote download failed'
+        $credential = Get-TestCredential -Secret 'Distinctive-6.3-Download-Secret!'
+        $downloadDestination = Join-Path -Path $TestDrive -ChildPath 'downloaded.txt'
+
+        $result = Copy-WinPushItem -ComputerName $script:TargetName -Path 'C:\Remote\missing.txt' -Destination $downloadDestination -Direction Download -Credential $credential
+        $propertyNames = @($result.PSObject.Properties.Name)
+
+        $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
+        $result.ComputerName | Should Be 'PC-001'
+        $result.Operation | Should Be 'CopyFile'
+        $result.Transport | Should Be 'Psrp'
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'remote download failed'
+        $result.Errors[0] | Should Be 'remote download failed'
+        ($propertyNames -match 'Credential|Password|Secret').Count | Should Be 0
     }
 
     It 'returns a failed result when session creation fails' {
@@ -410,6 +447,25 @@ Describe 'Copy-WinPushItem' {
         $diagnosticText | Should Not Match ([regex]::Escape($secret))
     }
 
+    It 'normalizes download credential session failures without leaking distinctive secret material' {
+        $secret = 'Distinctive-6.3-Download-Credential-Secret!'
+        $credential = Get-TestCredential -Secret $secret
+        $script:NewPSSessionError = "authentication failed for $secret"
+        $downloadDestination = Join-Path -Path $TestDrive -ChildPath 'downloaded.txt'
+
+        $result = Copy-WinPushItem -ComputerName $script:TargetName -Path 'C:\Remote\fixture.txt' -Destination $downloadDestination -Direction Download -Credential $credential
+        $diagnosticText = @(
+            $result.ErrorMessage
+            @($result.Errors)
+            @($result.Output)
+            @($result.Logs)
+        ) -join "`n"
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'PSRP file download session creation failed for the target with the supplied credential.'
+        $diagnosticText | Should Not Match ([regex]::Escape($secret))
+    }
+
     It 'does not send a credential argument to New-PSSession when omitted' {
         Copy-WinPushItem -ComputerName $script:TargetName -Path $script:FixtureFile -Destination 'C:\Remote\fixture.txt' | Out-Null
 
@@ -422,6 +478,17 @@ Describe 'Copy-WinPushItem' {
         $credential = Get-TestCredential -Secret 'Distinctive-6.1-Credential-Secret!'
 
         $result = Copy-WinPushItem -ComputerName $script:TargetName -Path $script:FixtureFile -Destination 'C:\Remote\fixture.txt' -Credential $credential
+
+        $result.Succeeded | Should Be $true
+        @($script:NewPSSessionCredentials).Count | Should Be 1
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
+    }
+
+    It 'passes the supplied download credential object unchanged to New-PSSession' {
+        $credential = Get-TestCredential -Secret 'Distinctive-6.3-Download-Credential-Secret!'
+        $downloadDestination = Join-Path -Path $TestDrive -ChildPath 'downloaded.txt'
+
+        $result = Copy-WinPushItem -ComputerName $script:TargetName -Path 'C:\Remote\fixture.txt' -Destination $downloadDestination -Direction Download -Credential $credential
 
         $result.Succeeded | Should Be $true
         @($script:NewPSSessionCredentials).Count | Should Be 1
