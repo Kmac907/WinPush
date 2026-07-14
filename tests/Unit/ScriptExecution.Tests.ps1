@@ -15,12 +15,18 @@ Describe 'Invoke-WinPushScript' {
     BeforeEach {
         $script:NewPSSessionComputerNames = @()
         $script:RemovedSessionIds = @()
+        $script:InvokedSessionComputerNames = @()
         $script:InvokedScriptPaths = @()
         $script:SessionToReturn = [pscustomobject] @{ Id = 302; ComputerName = 'PC-001' }
         $script:InvokeScriptOutput = @('script output')
         $script:InvokeScriptErrors = @()
         $script:NewPSSessionError = $null
         $script:InvokeScriptError = $null
+        $script:SessionIdByComputerName = @{}
+        $script:NewPSSessionErrorsByComputerName = @{}
+        $script:InvokeScriptOutputsByComputerName = @{}
+        $script:InvokeScriptErrorsByComputerName = @{}
+        $script:InvokeScriptThrowsByComputerName = @{}
         $script:FixtureScript = Join-Path -Path $TestDrive -ChildPath 'Invoke-WinPushScript-Fixture.ps1'
         Set-Content -LiteralPath $script:FixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
     }
@@ -38,6 +44,14 @@ Describe 'Invoke-WinPushScript' {
             throw $script:NewPSSessionError
         }
 
+        if ($script:NewPSSessionErrorsByComputerName.ContainsKey($ComputerName)) {
+            throw $script:NewPSSessionErrorsByComputerName[$ComputerName]
+        }
+
+        if ($script:SessionIdByComputerName.ContainsKey($ComputerName)) {
+            return [pscustomobject] @{ Id = $script:SessionIdByComputerName[$ComputerName]; ComputerName = $ComputerName }
+        }
+
         return $script:SessionToReturn
     }
 
@@ -48,16 +62,34 @@ Describe 'Invoke-WinPushScript' {
         )
 
         $null = $Session
+        if ($null -ne $Session -and -not [string]::IsNullOrWhiteSpace($Session.ComputerName)) {
+            $script:InvokedSessionComputerNames += $Session.ComputerName
+        }
+
         $script:InvokedScriptPaths += $FilePath
 
         if ($null -ne $script:InvokeScriptError) {
             throw $script:InvokeScriptError
         }
 
+        if ($script:InvokeScriptThrowsByComputerName.ContainsKey($Session.ComputerName)) {
+            throw $script:InvokeScriptThrowsByComputerName[$Session.ComputerName]
+        }
+
+        $output = $script:InvokeScriptOutput
+        if ($script:InvokeScriptOutputsByComputerName.ContainsKey($Session.ComputerName)) {
+            $output = $script:InvokeScriptOutputsByComputerName[$Session.ComputerName]
+        }
+
+        $errors = $script:InvokeScriptErrors
+        if ($script:InvokeScriptErrorsByComputerName.ContainsKey($Session.ComputerName)) {
+            $errors = $script:InvokeScriptErrorsByComputerName[$Session.ComputerName]
+        }
+
         return [pscustomobject] [ordered] @{
             PSTypeName = 'WinPush.PsrpScriptResult'
-            Output     = @($script:InvokeScriptOutput)
-            Errors     = @($script:InvokeScriptErrors)
+            Output     = @($output)
+            Errors     = @($errors)
         }
     }
 
@@ -89,6 +121,44 @@ Describe 'Invoke-WinPushScript' {
         $script:NewPSSessionComputerNames[0] | Should Be 'PC-001'
         @($script:InvokedScriptPaths).Count | Should Be 1
         $script:InvokedScriptPaths[0] | Should Be (Get-Item -LiteralPath $script:FixtureScript).FullName
+    }
+
+    It 'runs direct ComputerName arrays in resolved order without duplicate targets' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 301
+            'PC-002' = 302
+            'PC-003' = 303
+        }
+
+        $results = @(Invoke-WinPushScript -ComputerName @(' PC-001 ', 'pc-001', 'PC-002', 'PC-003') -ScriptPath $script:FixtureScript)
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:RemovedSessionIds -join ',') | Should Be '301,302,303'
+    }
+
+    It 'continues to later direct ComputerName targets after one target fails' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 301
+            'PC-003' = 303
+        }
+        $script:NewPSSessionErrorsByComputerName = @{
+            'PC-002' = 'connection failed'
+        }
+
+        $results = @(Invoke-WinPushScript -ComputerName @('PC-001', 'PC-002', 'PC-003') -ScriptPath $script:FixtureScript)
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $false
+        $results[1].ErrorMessage | Should Be 'connection failed'
+        $results[2].Succeeded | Should Be $true
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-003'
+        ($script:RemovedSessionIds -join ',') | Should Be '301,303'
     }
 
     It 'does not emit raw script output as separate pipeline objects' {
@@ -199,6 +269,38 @@ Describe 'Invoke-WinPushScript' {
         $summaryRows[0].StdErrPath | Should Be $result.StdErrPath
         (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'first line,second line'
         @(Get-Content -LiteralPath $result.StdErrPath).Count | Should Be 0
+    }
+
+    It 'captures direct ComputerName array output under one shared run folder' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 301
+            'PC-002' = 302
+        }
+        $script:InvokeScriptOutputsByComputerName = @{
+            'PC-001' = @('first target')
+            'PC-002' = @('second target')
+        }
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
+
+        $results = @(Invoke-WinPushScript -ComputerName @('PC-001', 'PC-002') -ScriptPath $script:FixtureScript -CaptureOutput -OutputRoot $outputRoot)
+
+        @($results).Count | Should Be 2
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
+        $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        $results[0].ResultPath | Should Be (Join-Path -Path $results[0].ComputerDirectory -ChildPath 'result.txt')
+        $results[1].ResultPath | Should Be (Join-Path -Path $results[1].ComputerDirectory -ChildPath 'result.txt')
+        (Get-Content -LiteralPath $results[0].StdOutPath) -join ',' | Should Be 'first target'
+        (Get-Content -LiteralPath $results[1].StdOutPath) -join ',' | Should Be 'second target'
+        Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001') -PathType Container | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-002') -PathType Container | Should Be $true
+        Test-Path -LiteralPath $results[0].ResultPath -PathType Leaf | Should Be $true
+        Test-Path -LiteralPath $results[1].ResultPath -PathType Leaf | Should Be $true
+        $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'summary.csv'))
+        @($summaryRows).Count | Should Be 2
+        ($summaryRows.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($summaryRows.Operation -join ',') | Should Be 'RunScript,RunScript'
+        ($summaryRows.ResultPath -join ',') | Should Be (($results[0].ResultPath, $results[1].ResultPath) -join ',')
     }
 
     It 'captures script errors to stderr artifact when requested' {

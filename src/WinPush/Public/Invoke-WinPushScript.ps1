@@ -2,7 +2,7 @@ function Invoke-WinPushScript {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, Position = 0)]
-        [string] $ComputerName,
+        [string[]] $ComputerName,
 
         [Parameter(Mandatory, Position = 1)]
         [string] $ScriptPath,
@@ -39,93 +39,100 @@ function Invoke-WinPushScript {
 
     end {
         $targets = @(Resolve-WinPushTarget -ComputerName @($ComputerName))
-        $target = $targets[0]
-        $session = $null
-        $runDirectory = $null
-        $computerDirectory = $null
-        $resultPath = $null
-        $stdOutPath = $null
-        $stdErrPath = $null
+        $sharedRunDirectory = $null
 
-        try {
-            $session = New-PSSession -ComputerName $target -ErrorAction Stop
-            $scriptResult = Invoke-WinPushPsrpScript -Session $session -FilePath $resolvedScriptPath
-            $output = @($scriptResult.Output)
-            $errors = @($scriptResult.Errors)
-            $succeeded = $errors.Count -eq 0
-            $exitCode = if ($succeeded) { 0 } else { 1 }
-            $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
+        foreach ($target in $targets) {
+            $session = $null
+            $runDirectory = $null
+            $computerDirectory = $null
+            $resultPath = $null
+            $stdOutPath = $null
+            $stdErrPath = $null
 
-            if ($CaptureOutput) {
-                $artifact = Write-WinPushCommandOutputArtifact `
-                    -OutputRoot $OutputRoot `
+            try {
+                $session = New-PSSession -ComputerName $target -ErrorAction Stop
+                $scriptResult = Invoke-WinPushPsrpScript -Session $session -FilePath $resolvedScriptPath
+                $output = @($scriptResult.Output)
+                $errors = @($scriptResult.Errors)
+                $succeeded = $errors.Count -eq 0
+                $exitCode = if ($succeeded) { 0 } else { 1 }
+                $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
+
+                if ($CaptureOutput) {
+                    $artifact = Write-WinPushCommandOutputArtifact `
+                        -OutputRoot $OutputRoot `
+                        -ComputerName $target `
+                        -Output $output `
+                        -Errors $errors `
+                        -RunDirectory $sharedRunDirectory `
+                        -Operation 'RunScript' `
+                        -Transport 'Psrp' `
+                        -Succeeded $succeeded `
+                        -ExitCode $exitCode `
+                        -ErrorMessage $errorMessage
+                    $sharedRunDirectory = $artifact.RunDirectory
+                    $runDirectory = $artifact.RunDirectory
+                    $computerDirectory = $artifact.ComputerDirectory
+                    $resultPath = $artifact.ResultPath
+                    $stdOutPath = $artifact.StdOutPath
+                    $stdErrPath = $artifact.StdErrPath
+                }
+
+                New-WinPushExecutionResult `
                     -ComputerName $target `
-                    -Output $output `
-                    -Errors $errors `
-                    -Operation 'RunScript' `
                     -Transport 'Psrp' `
+                    -Operation 'RunScript' `
                     -Succeeded $succeeded `
                     -ExitCode $exitCode `
-                    -ErrorMessage $errorMessage
-                $runDirectory = $artifact.RunDirectory
-                $computerDirectory = $artifact.ComputerDirectory
-                $resultPath = $artifact.ResultPath
-                $stdOutPath = $artifact.StdOutPath
-                $stdErrPath = $artifact.StdErrPath
+                    -ErrorMessage $errorMessage `
+                    -Output $output `
+                    -Errors $errors `
+                    -RunDirectory $runDirectory `
+                    -ComputerDirectory $computerDirectory `
+                    -ResultPath $resultPath `
+                    -StdOutPath $stdOutPath `
+                    -StdErrPath $stdErrPath
             }
+            catch {
+                $errorMessage = $_.Exception.Message
 
-            New-WinPushExecutionResult `
-                -ComputerName $target `
-                -Transport 'Psrp' `
-                -Operation 'RunScript' `
-                -Succeeded $succeeded `
-                -ExitCode $exitCode `
-                -ErrorMessage $errorMessage `
-                -Output $output `
-                -Errors $errors `
-                -RunDirectory $runDirectory `
-                -ComputerDirectory $computerDirectory `
-                -ResultPath $resultPath `
-                -StdOutPath $stdOutPath `
-                -StdErrPath $stdErrPath
-        }
-        catch {
-            $errorMessage = $_.Exception.Message
+                if ($CaptureOutput) {
+                    $artifact = Write-WinPushCommandOutputArtifact `
+                        -OutputRoot $OutputRoot `
+                        -ComputerName $target `
+                        -Errors $errorMessage `
+                        -RunDirectory $sharedRunDirectory `
+                        -Operation 'RunScript' `
+                        -Transport 'Psrp' `
+                        -Succeeded $false `
+                        -ExitCode 1 `
+                        -ErrorMessage $errorMessage
+                    $sharedRunDirectory = $artifact.RunDirectory
+                    $runDirectory = $artifact.RunDirectory
+                    $computerDirectory = $artifact.ComputerDirectory
+                    $resultPath = $artifact.ResultPath
+                    $stdOutPath = $artifact.StdOutPath
+                    $stdErrPath = $artifact.StdErrPath
+                }
 
-            if ($CaptureOutput) {
-                $artifact = Write-WinPushCommandOutputArtifact `
-                    -OutputRoot $OutputRoot `
+                New-WinPushExecutionResult `
                     -ComputerName $target `
-                    -Errors $errorMessage `
-                    -Operation 'RunScript' `
                     -Transport 'Psrp' `
+                    -Operation 'RunScript' `
                     -Succeeded $false `
                     -ExitCode 1 `
-                    -ErrorMessage $errorMessage
-                $runDirectory = $artifact.RunDirectory
-                $computerDirectory = $artifact.ComputerDirectory
-                $resultPath = $artifact.ResultPath
-                $stdOutPath = $artifact.StdOutPath
-                $stdErrPath = $artifact.StdErrPath
+                    -ErrorMessage $errorMessage `
+                    -Errors $errorMessage `
+                    -RunDirectory $runDirectory `
+                    -ComputerDirectory $computerDirectory `
+                    -ResultPath $resultPath `
+                    -StdOutPath $stdOutPath `
+                    -StdErrPath $stdErrPath
             }
-
-            New-WinPushExecutionResult `
-                -ComputerName $target `
-                -Transport 'Psrp' `
-                -Operation 'RunScript' `
-                -Succeeded $false `
-                -ExitCode 1 `
-                -ErrorMessage $errorMessage `
-                -Errors $errorMessage `
-                -RunDirectory $runDirectory `
-                -ComputerDirectory $computerDirectory `
-                -ResultPath $resultPath `
-                -StdOutPath $stdOutPath `
-                -StdErrPath $stdErrPath
-        }
-        finally {
-            if ($null -ne $session) {
-                Remove-PSSession -Id $session.Id -ErrorAction SilentlyContinue
+            finally {
+                if ($null -ne $session) {
+                    Remove-PSSession -Id $session.Id -ErrorAction SilentlyContinue
+                }
             }
         }
     }
