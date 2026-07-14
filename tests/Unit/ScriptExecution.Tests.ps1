@@ -11,6 +11,24 @@ $script:ScriptCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Publi
 . $script:PsrpScriptPath
 . $script:ScriptCommandPath
 
+function New-TestCredential {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Secret
+    )
+
+    $secureSecret = New-Object -TypeName System.Security.SecureString
+    foreach ($character in $Secret.ToCharArray()) {
+        $secureSecret.AppendChar($character)
+    }
+    $secureSecret.MakeReadOnly()
+
+    return New-Object -TypeName System.Management.Automation.PSCredential -ArgumentList @(
+        'CONTOSO\operator',
+        $secureSecret
+    )
+}
+
 Describe 'Invoke-WinPushScript' {
     BeforeEach {
         $script:NewPSSessionComputerNames = @()
@@ -27,6 +45,8 @@ Describe 'Invoke-WinPushScript' {
         $script:InvokeScriptOutputsByComputerName = @{}
         $script:InvokeScriptErrorsByComputerName = @{}
         $script:InvokeScriptThrowsByComputerName = @{}
+        $script:NewPSSessionCredentialSupplied = @()
+        $script:NewPSSessionCredentials = @()
         $script:FixtureScript = Join-Path -Path $TestDrive -ChildPath 'Invoke-WinPushScript-Fixture.ps1'
         Set-Content -LiteralPath $script:FixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
     }
@@ -34,11 +54,17 @@ Describe 'Invoke-WinPushScript' {
     Mock New-PSSession {
         param(
             [string] $ComputerName,
+            [System.Management.Automation.PSCredential] $Credential,
             $ErrorAction
         )
 
         $null = $ErrorAction
         $script:NewPSSessionComputerNames += $ComputerName
+        $credentialSupplied = $PSBoundParameters.ContainsKey('Credential')
+        $script:NewPSSessionCredentialSupplied += $credentialSupplied
+        if ($credentialSupplied) {
+            $script:NewPSSessionCredentials += $Credential
+        }
 
         if ($null -ne $script:NewPSSessionError) {
             throw $script:NewPSSessionError
@@ -121,6 +147,92 @@ Describe 'Invoke-WinPushScript' {
         $script:NewPSSessionComputerNames[0] | Should Be 'PC-001'
         @($script:InvokedScriptPaths).Count | Should Be 1
         $script:InvokedScriptPaths[0] | Should Be (Get-Item -LiteralPath $script:FixtureScript).FullName
+    }
+
+    It 'has an optional credential parameter' {
+        $command = Get-Command -Name Invoke-WinPushScript
+
+        ($command.Parameters.Keys -contains 'Credential') | Should Be $true
+        $command.Parameters['Credential'].ParameterType.FullName | Should Be 'System.Management.Automation.PSCredential'
+    }
+
+    It 'does not send a credential argument to New-PSSession when omitted' {
+        Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript | Out-Null
+
+        @($script:NewPSSessionCredentialSupplied).Count | Should Be 1
+        $script:NewPSSessionCredentialSupplied[0] | Should Be $false
+        @($script:NewPSSessionCredentials).Count | Should Be 0
+    }
+
+    It 'passes the supplied credential object unchanged for direct ComputerName targets' {
+        $credential = New-TestCredential -Secret 'Distinctive-5.3-Credential-Secret!'
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Credential $credential
+
+        $result.Succeeded | Should Be $true
+        @($script:NewPSSessionCredentials).Count | Should Be 1
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
+    }
+
+    It 'passes the supplied credential object unchanged for pipeline targets' {
+        $credential = New-TestCredential -Secret 'Distinctive-5.3-Credential-Secret!'
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 301
+            'PC-002' = 302
+        }
+
+        $results = @(@('PC-001', 'PC-002') | Invoke-WinPushScript -ScriptPath $script:FixtureScript -Credential $credential)
+
+        @($results).Count | Should Be 2
+        @($script:NewPSSessionCredentials).Count | Should Be 2
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[1], $credential) | Should Be $true
+    }
+
+    It 'passes the supplied credential object unchanged for host file targets' {
+        $credential = New-TestCredential -Secret 'Distinctive-5.3-Credential-Secret!'
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 301
+            'PC-002' = 302
+        }
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'hosts.txt'
+        @('PC-001', 'PC-002') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+
+        $results = @(Invoke-WinPushScript -HostFile $hostFile -ScriptPath $script:FixtureScript -Credential $credential)
+
+        @($results).Count | Should Be 2
+        @($script:NewPSSessionCredentials).Count | Should Be 2
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[1], $credential) | Should Be $true
+    }
+
+    It 'normalizes credential session failures without leaking distinctive secret material' {
+        $secret = 'Distinctive-5.3-Credential-Secret!'
+        $credential = New-TestCredential -Secret $secret
+        $script:NewPSSessionError = "authentication failed for $secret"
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Credential $credential 5>&1 4>&1 3>&1
+        $diagnosticText = @(
+            $result.ErrorMessage
+            @($result.Errors)
+            @($result.Output)
+            @($result.Logs)
+        ) -join "`n"
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'PSRP script session creation failed for the target with the supplied credential.'
+        $diagnosticText | Should Not Match ([regex]::Escape($secret))
+    }
+
+    It 'preserves post-session script failures when a credential is supplied' {
+        $credential = New-TestCredential -Secret 'Distinctive-5.3-Credential-Secret!'
+        $script:InvokeScriptError = 'script invocation failed'
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Credential $credential
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'script invocation failed'
     }
 
     It 'runs direct ComputerName arrays in resolved order without duplicate targets' {
@@ -575,12 +687,13 @@ Describe 'Invoke-WinPushScript' {
         ($command.Parameters.Keys -contains 'Parameters') | Should Be $false
     }
 
-    It 'exposes HostFile without adding credential support' {
+    It 'exposes HostFile and credential support' {
         $command = Get-Command -Name Invoke-WinPushScript
 
         ($command.Parameters.Keys -contains 'HostFile') | Should Be $true
         $command.Parameters['HostFile'].ParameterType.FullName | Should Be 'System.String'
-        ($command.Parameters.Keys -contains 'Credential') | Should Be $false
+        ($command.Parameters.Keys -contains 'Credential') | Should Be $true
+        $command.Parameters['Credential'].ParameterType.FullName | Should Be 'System.Management.Automation.PSCredential'
     }
 }
 

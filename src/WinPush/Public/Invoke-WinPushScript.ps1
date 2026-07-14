@@ -11,6 +11,8 @@ function Invoke-WinPushScript {
         [Parameter(Mandatory, Position = 1)]
         [string] $ScriptPath,
 
+        [System.Management.Automation.PSCredential] $Credential,
+
         [switch] $CaptureOutput,
 
         [string] $OutputRoot = 'C:\WinPush'
@@ -67,9 +69,17 @@ function Invoke-WinPushScript {
             $resultPath = $null
             $stdOutPath = $null
             $stdErrPath = $null
+            $sessionParameters = @{
+                ComputerName = $target
+                ErrorAction  = 'Stop'
+            }
+
+            if ($PSBoundParameters.ContainsKey('Credential')) {
+                $sessionParameters['Credential'] = $Credential
+            }
 
             try {
-                $session = New-PSSession -ComputerName $target -ErrorAction Stop
+                $session = New-PSSession @sessionParameters
                 $scriptResult = Invoke-WinPushPsrpScript -Session $session -FilePath $resolvedScriptPath
                 $output = @($scriptResult.Output)
                 $errors = @($scriptResult.Errors)
@@ -113,7 +123,12 @@ function Invoke-WinPushScript {
                     -StdErrPath $stdErrPath
             }
             catch {
-                $errorMessage = $_.Exception.Message
+                $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $null -eq $session) {
+                    'PSRP script session creation failed for the target with the supplied credential.'
+                }
+                else {
+                    $_.Exception.Message
+                }
 
                 if ($CaptureOutput) {
                     $artifact = Write-WinPushCommandOutputArtifact `
