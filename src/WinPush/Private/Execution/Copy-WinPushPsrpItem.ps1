@@ -8,12 +8,24 @@ function Copy-WinPushPsrpItem {
         [string] $Path,
 
         [Parameter(Mandatory)]
-        [string] $Destination
+        [string] $Destination,
+
+        [ValidateSet('Upload', 'Download')]
+        [string] $Direction = 'Upload'
     )
 
-    Copy-Item `
-        -LiteralPath $Path `
-        -Destination $Destination `
-        -ToSession $Session `
-        -ErrorAction Stop
+    if ($Direction -eq 'Download') {
+        Copy-Item `
+            -LiteralPath $Path `
+            -Destination $Destination `
+            -FromSession $Session `
+            -ErrorAction Stop
+    }
+    else {
+        Copy-Item `
+            -LiteralPath $Path `
+            -Destination $Destination `
+            -ToSession $Session `
+            -ErrorAction Stop
+    }
 }

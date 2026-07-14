@@ -10,6 +10,9 @@ function Copy-WinPushItem {
         [Parameter(Mandatory, Position = 2)]
         [string] $Destination,
 
+        [ValidateSet('Upload', 'Download')]
+        [string] $Direction = 'Upload',
+
         [System.Management.Automation.PSCredential] $Credential
     )
 
@@ -30,28 +33,61 @@ function Copy-WinPushItem {
             throw [System.ArgumentException]::new('Path must not be empty.')
         }
 
-        if (-not (Test-Path -LiteralPath $Path)) {
-            throw [System.IO.FileNotFoundException]::new("File was not found: $Path")
-        }
-
-        $pathItem = Get-Item -LiteralPath $Path
-        if ($pathItem.PSProvider.Name -ne 'FileSystem') {
-            throw [System.ArgumentException]::new("Path must refer to a local file: $Path")
-        }
-
-        if ($pathItem.PSIsContainer) {
-            throw [System.ArgumentException]::new("Path must refer to a file: $Path")
-        }
-
         if ([string]::IsNullOrWhiteSpace($Destination)) {
             throw [System.ArgumentException]::new('Destination must not be empty.')
+        }
+
+        $metadataSource = $Path
+        $metadataDestination = $Destination
+        $metadataFileName = $null
+        $metadataLength = $null
+
+        if ($Direction -eq 'Upload') {
+            if (-not (Test-Path -LiteralPath $Path)) {
+                throw [System.IO.FileNotFoundException]::new("File was not found: $Path")
+            }
+
+            $pathItem = Get-Item -LiteralPath $Path
+            if ($pathItem.PSProvider.Name -ne 'FileSystem') {
+                throw [System.ArgumentException]::new("Path must refer to a local file: $Path")
+            }
+
+            if ($pathItem.PSIsContainer) {
+                throw [System.ArgumentException]::new("Path must refer to a file: $Path")
+            }
+
+            $metadataSource = $pathItem.FullName
+            $metadataFileName = $pathItem.Name
+            $metadataLength = $pathItem.Length
+        }
+        else {
+            if (Test-Path -LiteralPath $Destination) {
+                $destinationItem = Get-Item -LiteralPath $Destination
+                if ($destinationItem.PSProvider.Name -ne 'FileSystem') {
+                    throw [System.ArgumentException]::new("Destination must refer to a local filesystem path: $Destination")
+                }
+            }
+            else {
+                $destinationParent = Split-Path -Path $Destination -Parent
+                if ([string]::IsNullOrWhiteSpace($destinationParent)) {
+                    $destinationParent = (Get-Location -PSProvider FileSystem).ProviderPath
+                }
+
+                if (-not (Test-Path -LiteralPath $destinationParent -PathType Container)) {
+                    throw [System.IO.DirectoryNotFoundException]::new("Destination parent directory was not found: $destinationParent")
+                }
+
+                $destinationParentItem = Get-Item -LiteralPath $destinationParent
+                if ($destinationParentItem.PSProvider.Name -ne 'FileSystem') {
+                    throw [System.ArgumentException]::new("Destination must refer to a local filesystem path: $Destination")
+                }
+            }
         }
 
         if ($ComputerName -is [array]) {
             throw [System.ArgumentException]::new('Copy-WinPushItem requires exactly one target.')
         }
 
-        $resolvedPath = $pathItem.FullName
         $targets = @(Resolve-WinPushTarget -ComputerName ([string] $ComputerName))
         if ($targets.Count -ne 1) {
             throw [System.ArgumentException]::new('Copy-WinPushItem requires exactly one target.')
@@ -69,14 +105,14 @@ function Copy-WinPushItem {
 
         $sessionCreationStarted = $true
         $session = New-PSSession @sessionParameters
-        Copy-WinPushPsrpItem -Session $session -Path $resolvedPath -Destination $Destination
+        Copy-WinPushPsrpItem -Session $session -Path $metadataSource -Destination $Destination -Direction $Direction
 
         $metadata = [pscustomobject] [ordered] @{
-            Direction   = 'Upload'
-            Source      = $resolvedPath
-            Destination = $Destination
-            FileName    = $pathItem.Name
-            Length      = $pathItem.Length
+            Direction   = $Direction
+            Source      = $metadataSource
+            Destination = $metadataDestination
+            FileName    = $metadataFileName
+            Length      = $metadataLength
         }
 
         New-WinPushExecutionResult `
@@ -88,8 +124,11 @@ function Copy-WinPushItem {
             -Output $metadata
     }
     catch {
-        $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $sessionCreationStarted -and $null -eq $session) {
+        $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $sessionCreationStarted -and $null -eq $session -and $Direction -eq 'Upload') {
             'PSRP file upload session creation failed for the target with the supplied credential.'
+        }
+        elseif ($PSBoundParameters.ContainsKey('Credential') -and $sessionCreationStarted -and $null -eq $session -and $Direction -eq 'Download') {
+            'PSRP file download session creation failed for the target with the supplied credential.'
         }
         else {
             $_.Exception.Message
