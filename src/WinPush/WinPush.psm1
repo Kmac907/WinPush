@@ -17,6 +17,7 @@ foreach ($sourcePath in @($privatePath, $publicPath)) {
 }
 
 $publicFunctionsToExport = @(
+    'Copy-WinPushItem',
     'Invoke-WinPushCommand',
     'Invoke-WinPushScript',
     'Test-WinPushTarget'

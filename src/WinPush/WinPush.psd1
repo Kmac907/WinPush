@@ -10,6 +10,7 @@
     CompatiblePSEditions = @('Core')
 
     FunctionsToExport    = @(
+        'Copy-WinPushItem',
         'Invoke-WinPushCommand',
         'Invoke-WinPushScript',
         'Test-WinPushTarget'
