@@ -32,9 +32,15 @@ WinPush/
 │  └─ Private/
 ├─ WinPush.psd1
 ├─ WinPush.psm1
+├─ build/
+│  └─ build.ps1
 └─ tests/
    └─ Unit/
 ```
+
+`build/build.ps1` is a module-local quality gate for developer and CI validation. It is not runtime code and does not contain Azure DevOps pipeline-only logic.
+
+Generated build and validation output is written under `artifacts/`, which is ignored and should not be committed.
 
 ## Public Commands
 
@@ -275,6 +281,8 @@ Run the offline quality gate from this module folder:
 
 The gate validates the manifest, imports the module twice, runs PSScriptAnalyzer against `src`, `tests`, and `build`, runs offline unit tests, and writes CI-readable test and coverage artifacts under `artifacts\build`.
 
+`artifacts\build` is generated output from the local quality gate, not reviewed source.
+
 The import foundation can also be checked manually with:
 
 ```powershell
@@ -284,7 +292,7 @@ Import-Module .\WinPush.psd1 -Force
 
 ## Maturity
 
-`Experimental`
+`Testing`
 
 The module foundation, result contracts, target resolution, connectivity checks across direct, pipeline, and host-file targets, credential pass-through behavior, direct, pipeline, and host-file target command summary execution with credential support, explicit cmd.exe command text through PSRP, command error-stream semantics, command capture-output artifacts, command-attached log copy, direct, pipeline, or host-file local `.ps1` execution with credential support, script capture-output artifacts, script-attached log copy, single-file PSRP upload/download transfer, and direct, pipeline, or host-file remote log directory copy exist. Automatic cmd.exe wrapping, native command transports, recursive transfer, multi-target transfer, recursive log enumeration, and package workflow execution are not yet implemented.
 
@@ -297,4 +305,5 @@ Version source: `WinPush.psd1`
 ## Ownership And Support
 
 - Owner: Endpoint Engineering
+- Support contact: Endpoint Engineering
 - Repository path: `Modules/WinPush`
