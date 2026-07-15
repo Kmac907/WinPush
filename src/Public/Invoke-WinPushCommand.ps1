@@ -11,6 +11,9 @@ function Invoke-WinPushCommand {
         [Parameter(Mandatory, Position = 1)]
         [string] $Command,
 
+        [ValidateSet('Psrp', 'WinRM')]
+        [string] $Transport = 'Psrp',
+
         [System.Management.Automation.PSCredential] $Credential,
 
         [switch] $CaptureOutput,
@@ -31,10 +34,15 @@ function Invoke-WinPushCommand {
 
         $remoteLogDirectory = if ($Logs) { Get-WinPushCommandLogDirectory -Command $Command } else { $null }
         $computerNames = [System.Collections.Generic.List[string]]::new()
+        $pipelineInputReceived = $false
     }
 
     process {
         if ($PSCmdlet.ParameterSetName -eq 'ComputerName') {
+            if ($MyInvocation.ExpectingInput) {
+                $pipelineInputReceived = $true
+            }
+
             foreach ($target in @($ComputerName)) {
                 $computerNames.Add($target)
             }
@@ -47,6 +55,32 @@ function Invoke-WinPushCommand {
         }
         else {
             $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
+        }
+
+        if ($Transport -eq 'WinRM') {
+            if ($PSBoundParameters.ContainsKey('Credential')) {
+                throw [System.NotSupportedException]::new('Credential is not supported when Transport is WinRM.')
+            }
+
+            if ($CaptureOutput) {
+                throw [System.NotSupportedException]::new('CaptureOutput is not supported when Transport is WinRM.')
+            }
+
+            if ($Logs) {
+                throw [System.NotSupportedException]::new('Logs is not supported when Transport is WinRM.')
+            }
+
+            if ($PSCmdlet.ParameterSetName -eq 'HostFile') {
+                throw [System.NotSupportedException]::new('HostFile targets are not supported when Transport is WinRM.')
+            }
+
+            if ($pipelineInputReceived) {
+                throw [System.NotSupportedException]::new('Pipeline targets are not supported when Transport is WinRM.')
+            }
+
+            if ($targets.Count -ne 1) {
+                throw [System.NotSupportedException]::new('Transport WinRM supports exactly one target.')
+            }
         }
 
         $sharedRunDirectory = $null
@@ -67,6 +101,32 @@ function Invoke-WinPushCommand {
 
             if ($PSBoundParameters.ContainsKey('Credential')) {
                 $sessionParameters['Credential'] = $Credential
+            }
+
+            if ($Transport -eq 'WinRM') {
+                try {
+                    $commandResult = Invoke-WinPushWinRsCommand -ComputerName $target -Command $Command
+                    $exitCode = $commandResult.ExitCode
+
+                    New-WinPushExecutionResult `
+                        -ComputerName $target `
+                        -Transport 'WinRM' `
+                        -Operation 'RunCommand' `
+                        -Succeeded $true `
+                        -ExitCode $exitCode
+                }
+                catch {
+                    New-WinPushExecutionResult `
+                        -ComputerName $target `
+                        -Transport 'WinRM' `
+                        -Operation 'RunCommand' `
+                        -Succeeded $false `
+                        -ExitCode 1 `
+                        -ErrorMessage $_.Exception.Message `
+                        -Errors $_.Exception.Message
+                }
+
+                continue
             }
 
             try {

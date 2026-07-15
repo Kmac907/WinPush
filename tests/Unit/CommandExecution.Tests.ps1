@@ -3,6 +3,8 @@ $script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Privat
 $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushExecutionResult.ps1'
 $script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushLogResult.ps1'
 $script:ArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
+$script:NativeProcessPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushNativeProcess.ps1'
+$script:WinRsCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushWinRsCommand.ps1'
 $script:PsrpCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushPsrpCommand.ps1'
 $script:CommandLogDirectoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\Get-WinPushCommandLogDirectory.ps1'
 $script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\New-WinPushLogArtifactDirectory.ps1'
@@ -14,6 +16,8 @@ $script:FixtureRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -
 . $script:ResultFactoryPath
 . $script:LogResultFactoryPath
 . $script:ArtifactPath
+. $script:NativeProcessPath
+. $script:WinRsCommandPath
 . $script:PsrpCommandPath
 . $script:CommandLogDirectoryPath
 . $script:LogArtifactPath
@@ -65,6 +69,12 @@ Describe 'Invoke-WinPushCommand' {
         $script:LogCopyError = $null
         $script:LogCopyReturnedLogs = $null
         $script:LogCopyReturnedCopiedLogPaths = $null
+        $script:NativeProcessFilePaths = @()
+        $script:NativeProcessArgumentLists = @()
+        $script:NativeProcessError = $null
+        $script:NativeProcessExitCode = 0
+        $script:NativeProcessStandardOutput = "winrs output`r`n"
+        $script:NativeProcessStandardError = ''
     }
 
     Mock New-PSSession {
@@ -209,6 +219,29 @@ Describe 'Invoke-WinPushCommand' {
         }
     }
 
+    Mock Invoke-WinPushNativeProcess {
+        param(
+            [string] $FilePath,
+            [string[]] $ArgumentList
+        )
+
+        $script:NativeProcessFilePaths += $FilePath
+        $script:NativeProcessArgumentLists += , @($ArgumentList)
+
+        if ($null -ne $script:NativeProcessError) {
+            throw $script:NativeProcessError
+        }
+
+        [pscustomobject] [ordered] @{
+            PSTypeName      = 'WinPush.NativeProcessResult'
+            FilePath        = $FilePath
+            ArgumentList    = @($ArgumentList)
+            ExitCode        = $script:NativeProcessExitCode
+            StandardOutput  = $script:NativeProcessStandardOutput
+            StandardError   = $script:NativeProcessStandardError
+        }
+    }
+
     Mock Remove-PSSession {
         $script:RemovedSessionIds += $Id
     }
@@ -284,6 +317,21 @@ Describe 'Invoke-WinPushCommand' {
 
         ($command.Parameters.Keys -contains 'Credential') | Should Be $true
         $command.Parameters['Credential'].ParameterType.FullName | Should Be 'System.Management.Automation.PSCredential'
+    }
+
+    It 'has an optional transport parameter with PSRP as the default' {
+        $command = Get-Command -Name Invoke-WinPushCommand
+
+        ($command.Parameters.Keys -contains 'Transport') | Should Be $true
+        $command.Parameters['Transport'].ParameterType.FullName | Should Be 'System.String'
+        $validateSet = @($command.Parameters['Transport'].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] })
+        @($validateSet).Count | Should Be 1
+        ($validateSet[0].ValidValues -join ',') | Should Be 'Psrp,WinRM'
+
+        Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' | Out-Null
+
+        @($script:NewPSSessionComputerNames).Count | Should Be 1
+        @($script:NativeProcessFilePaths).Count | Should Be 0
     }
 
     It 'has optional command-attached log collection without arbitrary log directory passthrough' {
@@ -941,5 +989,75 @@ Describe 'Invoke-WinPushCommand' {
         $result.ExitCode | Should Be 1
         $result.ErrorMessage | Should Be 'connection failed'
         @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
+    It 'runs one WinRS command through the native process boundary' {
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport WinRM
+
+        $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
+        $result.ComputerName | Should Be 'PC-001'
+        $result.Transport | Should Be 'WinRM'
+        $result.Operation | Should Be 'RunCommand'
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        @($result.Output).Count | Should Be 0
+        @($result.Errors).Count | Should Be 0
+        @($script:NativeProcessFilePaths).Count | Should Be 1
+        $script:NativeProcessFilePaths[0] | Should Be 'winrs.exe'
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '-r:PC-001|hostname'
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
+    It 'rejects WinRM credentials before launching a native process' {
+        $credential = New-TestCredential -Secret 'Distinctive-9.1-Credential-Secret!'
+
+        { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport WinRM -Credential $credential } |
+            Should Throw 'Credential is not supported when Transport is WinRM.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects WinRM host-file targets before launching a native process' {
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'valid-hosts.txt'
+
+        { Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname' -Transport WinRM } |
+            Should Throw 'HostFile targets are not supported when Transport is WinRM.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects multiple WinRM targets before launching a native process' {
+        { Invoke-WinPushCommand -ComputerName @('PC-001', 'PC-002') -Command 'hostname' -Transport WinRM } |
+            Should Throw 'Transport WinRM supports exactly one target.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects WinRM pipeline targets before launching a native process' {
+        { @('PC-001') | Invoke-WinPushCommand -Command 'hostname' -Transport WinRM } |
+            Should Throw 'Pipeline targets are not supported when Transport is WinRM.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects WinRM capture-output artifacts before launching a native process' {
+        { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport WinRM -CaptureOutput -OutputRoot $TestDrive } |
+            Should Throw 'CaptureOutput is not supported when Transport is WinRM.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects WinRM attached logs before launching a native process' {
+        { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport WinRM -Logs -OutputRoot $TestDrive } |
+            Should Throw 'Logs is not supported when Transport is WinRM.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 }
