@@ -15,6 +15,8 @@ function Invoke-WinPushScript {
 
         [switch] $CaptureOutput,
 
+        [switch] $Logs,
+
         [string] $OutputRoot = 'C:\WinPush'
     )
 
@@ -23,7 +25,7 @@ function Invoke-WinPushScript {
             throw [System.ArgumentException]::new('ScriptPath must not be empty.')
         }
 
-        if ($CaptureOutput -and [string]::IsNullOrWhiteSpace($OutputRoot)) {
+        if (($CaptureOutput -or $Logs) -and [string]::IsNullOrWhiteSpace($OutputRoot)) {
             throw [System.ArgumentException]::new('OutputRoot must not be empty.')
         }
 
@@ -41,6 +43,7 @@ function Invoke-WinPushScript {
         }
 
         $resolvedScriptPath = $scriptItem.FullName
+        $remoteLogDirectory = if ($Logs) { Get-WinPushScriptLogDirectory -ScriptPath $resolvedScriptPath } else { $null }
         $computerNames = [System.Collections.Generic.List[string]]::new()
     }
 
@@ -69,6 +72,8 @@ function Invoke-WinPushScript {
             $resultPath = $null
             $stdOutPath = $null
             $stdErrPath = $null
+            $logResults = @()
+            $copiedLogPaths = @()
             $sessionParameters = @{
                 ComputerName = $target
                 ErrorAction  = 'Stop'
@@ -107,6 +112,42 @@ function Invoke-WinPushScript {
                     $stdErrPath = $artifact.StdErrPath
                 }
 
+                if ($Logs) {
+                    try {
+                        $logCopy = Copy-WinPushPsrpLogDirectory `
+                            -Session $session `
+                            -ComputerName $target `
+                            -RemoteDirectory $remoteLogDirectory `
+                            -OutputRoot $OutputRoot `
+                            -RunDirectory $sharedRunDirectory `
+                            -ComputerDirectory $computerDirectory
+                        $sharedRunDirectory = $logCopy.RunDirectory
+                        $runDirectory = $logCopy.RunDirectory
+                        $computerDirectory = $logCopy.ComputerDirectory
+                        $logResults = @($logCopy.Logs)
+                        $copiedLogPaths = @($logCopy.CopiedLogPaths)
+                    }
+                    catch {
+                        if ([string]::IsNullOrWhiteSpace($runDirectory) -or [string]::IsNullOrWhiteSpace($computerDirectory)) {
+                            $artifactDirectory = New-WinPushLogArtifactDirectory `
+                                -OutputRoot $OutputRoot `
+                                -ComputerName $target `
+                                -RunDirectory $sharedRunDirectory
+                            $sharedRunDirectory = $artifactDirectory.RunDirectory
+                            $runDirectory = $artifactDirectory.RunDirectory
+                            $computerDirectory = $artifactDirectory.ComputerDirectory
+                        }
+
+                        $logResults = @(
+                            New-WinPushLogResult `
+                                -ComputerName $target `
+                                -RemotePath $remoteLogDirectory `
+                                -Copied $false `
+                                -ErrorMessage $_.Exception.Message
+                        )
+                    }
+                }
+
                 New-WinPushExecutionResult `
                     -ComputerName $target `
                     -Transport 'Psrp' `
@@ -120,7 +161,9 @@ function Invoke-WinPushScript {
                     -ComputerDirectory $computerDirectory `
                     -ResultPath $resultPath `
                     -StdOutPath $stdOutPath `
-                    -StdErrPath $stdErrPath
+                    -StdErrPath $stdErrPath `
+                    -Logs $logResults `
+                    -CopiedLogPaths $copiedLogPaths
             }
             catch {
                 $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $null -eq $session) {
@@ -149,6 +192,42 @@ function Invoke-WinPushScript {
                     $stdErrPath = $artifact.StdErrPath
                 }
 
+                if ($Logs -and $null -ne $session) {
+                    try {
+                        $logCopy = Copy-WinPushPsrpLogDirectory `
+                            -Session $session `
+                            -ComputerName $target `
+                            -RemoteDirectory $remoteLogDirectory `
+                            -OutputRoot $OutputRoot `
+                            -RunDirectory $sharedRunDirectory `
+                            -ComputerDirectory $computerDirectory
+                        $sharedRunDirectory = $logCopy.RunDirectory
+                        $runDirectory = $logCopy.RunDirectory
+                        $computerDirectory = $logCopy.ComputerDirectory
+                        $logResults = @($logCopy.Logs)
+                        $copiedLogPaths = @($logCopy.CopiedLogPaths)
+                    }
+                    catch {
+                        if ([string]::IsNullOrWhiteSpace($runDirectory) -or [string]::IsNullOrWhiteSpace($computerDirectory)) {
+                            $artifactDirectory = New-WinPushLogArtifactDirectory `
+                                -OutputRoot $OutputRoot `
+                                -ComputerName $target `
+                                -RunDirectory $sharedRunDirectory
+                            $sharedRunDirectory = $artifactDirectory.RunDirectory
+                            $runDirectory = $artifactDirectory.RunDirectory
+                            $computerDirectory = $artifactDirectory.ComputerDirectory
+                        }
+
+                        $logResults = @(
+                            New-WinPushLogResult `
+                                -ComputerName $target `
+                                -RemotePath $remoteLogDirectory `
+                                -Copied $false `
+                                -ErrorMessage $_.Exception.Message
+                        )
+                    }
+                }
+
                 New-WinPushExecutionResult `
                     -ComputerName $target `
                     -Transport 'Psrp' `
@@ -161,7 +240,9 @@ function Invoke-WinPushScript {
                     -ComputerDirectory $computerDirectory `
                     -ResultPath $resultPath `
                     -StdOutPath $stdOutPath `
-                    -StdErrPath $stdErrPath
+                    -StdErrPath $stdErrPath `
+                    -Logs $logResults `
+                    -CopiedLogPaths $copiedLogPaths
             }
             finally {
                 if ($null -ne $session) {

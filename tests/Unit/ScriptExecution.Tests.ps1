@@ -1,14 +1,22 @@
 $script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..\src\WinPush')
 $script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Targeting\Resolve-WinPushTarget.ps1'
 $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushExecutionResult.ps1'
+$script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushLogResult.ps1'
 $script:ArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
 $script:PsrpScriptPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Invoke-WinPushPsrpScript.ps1'
+$script:ScriptLogDirectoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\Get-WinPushScriptLogDirectory.ps1'
+$script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\New-WinPushLogArtifactDirectory.ps1'
+$script:PsrpLogCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\Copy-WinPushPsrpLogDirectory.ps1'
 $script:ScriptCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Public\Invoke-WinPushScript.ps1'
 
 . $script:ResolverPath
 . $script:ResultFactoryPath
+. $script:LogResultFactoryPath
 . $script:ArtifactPath
 . $script:PsrpScriptPath
+. $script:ScriptLogDirectoryPath
+. $script:LogArtifactPath
+. $script:PsrpLogCopyPath
 . $script:ScriptCommandPath
 
 function New-TestCredential {
@@ -47,6 +55,13 @@ Describe 'Invoke-WinPushScript' {
         $script:InvokeScriptThrowsByComputerName = @{}
         $script:NewPSSessionCredentialSupplied = @()
         $script:NewPSSessionCredentials = @()
+        $script:OperationOrder = @()
+        $script:CopiedLogSessions = @()
+        $script:CopiedLogComputerNames = @()
+        $script:CopiedLogRemoteDirectories = @()
+        $script:CopiedLogRunDirectories = @()
+        $script:CopiedLogComputerDirectories = @()
+        $script:LogCopyError = $null
         $script:FixtureScript = Join-Path -Path $TestDrive -ChildPath 'Invoke-WinPushScript-Fixture.ps1'
         Set-Content -LiteralPath $script:FixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
     }
@@ -93,6 +108,7 @@ Describe 'Invoke-WinPushScript' {
         }
 
         $script:InvokedScriptPaths += $FilePath
+        $script:OperationOrder += ('Script:{0}' -f $Session.ComputerName)
 
         if ($null -ne $script:InvokeScriptError) {
             throw $script:InvokeScriptError
@@ -119,6 +135,65 @@ Describe 'Invoke-WinPushScript' {
         }
     }
 
+    Mock Copy-WinPushPsrpLogDirectory {
+        param(
+            $Session,
+            [string] $ComputerName,
+            [string] $RemoteDirectory,
+            [string] $OutputRoot,
+            [AllowNull()]
+            [string] $RunDirectory,
+            [AllowNull()]
+            [string] $ComputerDirectory
+        )
+
+        $script:CopiedLogSessions += $Session
+        $script:CopiedLogComputerNames += $ComputerName
+        $script:CopiedLogRemoteDirectories += $RemoteDirectory
+        $script:CopiedLogRunDirectories += $RunDirectory
+        $script:CopiedLogComputerDirectories += $ComputerDirectory
+        $script:OperationOrder += ('Logs:{0}' -f $Session.ComputerName)
+
+        if ($null -ne $script:LogCopyError) {
+            throw $script:LogCopyError
+        }
+
+        $effectiveRunDirectory = if ([string]::IsNullOrWhiteSpace($RunDirectory)) {
+            Join-Path -Path $OutputRoot -ChildPath 'run-logs'
+        }
+        else {
+            $RunDirectory
+        }
+        $effectiveComputerDirectory = if ([string]::IsNullOrWhiteSpace($ComputerDirectory)) {
+            Join-Path -Path $effectiveRunDirectory -ChildPath $ComputerName
+        }
+        else {
+            $ComputerDirectory
+        }
+        $localPath = Join-Path -Path (Join-Path -Path $effectiveComputerDirectory -ChildPath 'Logs') -ChildPath 'script.log'
+        $remotePath = Join-Path -Path $RemoteDirectory -ChildPath 'script.log'
+        $logResult = New-WinPushLogResult `
+            -ComputerName $ComputerName `
+            -RemotePath $remotePath `
+            -LocalPath $localPath `
+            -Copied $true
+
+        [pscustomobject] [ordered] @{
+            FileMetadata      = @(
+                [pscustomobject] @{
+                    Name       = 'script.log'
+                    RemotePath = $remotePath
+                }
+            )
+            Logs              = @($logResult)
+            Errors            = @()
+            CopiedLogPaths    = @($localPath)
+            RunDirectory      = $effectiveRunDirectory
+            ComputerDirectory = $effectiveComputerDirectory
+            LogDirectory      = Join-Path -Path $effectiveComputerDirectory -ChildPath 'Logs'
+        }
+    }
+
     Mock Remove-PSSession {
         $script:RemovedSessionIds += $Id
     }
@@ -136,6 +211,8 @@ Describe 'Invoke-WinPushScript' {
         @($result.Output).Count | Should Be 1
         $result.Output[0] | Should Be 'script output'
         @($result.Errors).Count | Should Be 0
+        @($result.Logs).Count | Should Be 0
+        @($script:CopiedLogSessions).Count | Should Be 0
         $null -eq $result.StdOutPath | Should Be $true
         $null -eq $result.StdErrPath | Should Be $true
     }
@@ -154,6 +231,20 @@ Describe 'Invoke-WinPushScript' {
 
         ($command.Parameters.Keys -contains 'Credential') | Should Be $true
         $command.Parameters['Credential'].ParameterType.FullName | Should Be 'System.Management.Automation.PSCredential'
+    }
+
+    It 'has optional script-attached log collection without arbitrary log directory passthrough' {
+        $command = Get-Command -Name Invoke-WinPushScript
+
+        ($command.Parameters.Keys -contains 'Logs') | Should Be $true
+        $command.Parameters['Logs'].ParameterType.FullName | Should Be 'System.Management.Automation.SwitchParameter'
+        ($command.Parameters.Keys -contains 'LogDirectory') | Should Be $false
+        ($command.Parameters.Keys -contains 'RemoteDirectory') | Should Be $false
+    }
+
+    It 'derives script-attached log directories from the script base name' {
+        Get-WinPushScriptLogDirectory -ScriptPath 'C:\Packages\Install-EA.ps1' | Should Be 'C:\ProgramData\EA\Logs\Install-EA'
+        Get-WinPushScriptLogDirectory -ScriptPath 'C:\Packages\EA Upgrade.ps1' | Should Be 'C:\ProgramData\EA\Logs\EA Upgrade'
     }
 
     It 'does not send a credential argument to New-PSSession when omitted' {
@@ -452,6 +543,117 @@ Describe 'Invoke-WinPushScript' {
         $results[0].Errors[0] | Should Be 'kept error'
     }
 
+    It 'copies script-attached logs after a successful script using the same PSSession' {
+        $fixtureScript = Join-Path -Path $TestDrive -ChildPath 'Install-EA.ps1'
+        Set-Content -LiteralPath $fixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $fixtureScript -Logs -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $true
+        $result.Output[0] | Should Be 'script output'
+        @($result.Errors).Count | Should Be 0
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].PSTypeNames[0] | Should Be 'WinPush.LogResult'
+        $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\Install-EA\script.log'
+        $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
+        $result.RunDirectory | Should Be (Join-Path -Path $TestDrive -ChildPath 'run-logs')
+        $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
+        @($script:CopiedLogSessions).Count | Should Be 1
+        [object]::ReferenceEquals($script:CopiedLogSessions[0], $script:SessionToReturn) | Should Be $true
+        $script:CopiedLogRemoteDirectories[0] | Should Be 'C:\ProgramData\EA\Logs\Install-EA'
+        ($script:OperationOrder -join ',') | Should Be 'Script:PC-001,Logs:PC-001'
+    }
+
+    It 'copies script-attached logs after an error-emitting script without replacing script output or errors' {
+        $fixtureScript = Join-Path -Path $TestDrive -ChildPath 'Fail-EA.ps1'
+        Set-Content -LiteralPath $fixtureScript -Value 'Write-Error "script failed"' -Encoding utf8NoBOM
+        $script:InvokeScriptOutput = @('before error')
+        $script:InvokeScriptErrors = @('script failed')
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $fixtureScript -Logs -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'script failed'
+        $result.Output[0] | Should Be 'before error'
+        $result.Errors[0] | Should Be 'script failed'
+        @($result.Logs).Count | Should Be 1
+        $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
+        $script:CopiedLogRemoteDirectories[0] | Should Be 'C:\ProgramData\EA\Logs\Fail-EA'
+        ($script:OperationOrder -join ',') | Should Be 'Script:PC-001,Logs:PC-001'
+    }
+
+    It 'records script-attached log source failures without changing primary script success' {
+        $fixtureScript = Join-Path -Path $TestDrive -ChildPath 'Install-EA.ps1'
+        Set-Content -LiteralPath $fixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
+        $script:LogCopyError = 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\Install-EA'
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $fixtureScript -Logs -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        [string]::IsNullOrEmpty($result.ErrorMessage) | Should Be $true
+        @($result.Output).Count | Should Be 1
+        @($result.Errors).Count | Should Be 0
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].Copied | Should Be $false
+        $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\Install-EA'
+        $result.Logs[0].Error | Should Be 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\Install-EA'
+        @($result.CopiedLogPaths).Count | Should Be 0
+    }
+
+    It 'shares one log run folder across direct ComputerName script targets' {
+        $fixtureScript = Join-Path -Path $TestDrive -ChildPath 'Install-EA.ps1'
+        Set-Content -LiteralPath $fixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+
+        $results = @(Invoke-WinPushScript -ComputerName @('PC-001', 'PC-002') -ScriptPath $fixtureScript -Logs -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
+        $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        ($script:CopiedLogComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        ($script:CopiedLogRemoteDirectories -join ',') | Should Be 'C:\ProgramData\EA\Logs\Install-EA,C:\ProgramData\EA\Logs\Install-EA'
+    }
+
+    It 'copies script-attached logs for pipeline targets' {
+        $fixtureScript = Join-Path -Path $TestDrive -ChildPath 'Install-EA.ps1'
+        Set-Content -LiteralPath $fixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+
+        $results = @(@('PC-001', 'PC-002') | Invoke-WinPushScript -ScriptPath $fixtureScript -Logs -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($script:CopiedLogComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+    }
+
+    It 'copies script-attached logs for host file targets' {
+        $fixtureScript = Join-Path -Path $TestDrive -ChildPath 'Install-EA.ps1'
+        Set-Content -LiteralPath $fixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'hosts.txt'
+        @('PC-001', 'PC-002') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+
+        $results = @(Invoke-WinPushScript -HostFile $hostFile -ScriptPath $fixtureScript -Logs -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($script:CopiedLogComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+    }
+
     It 'captures script output to one target artifact folder when requested' {
         $script:InvokeScriptOutput = @('first line', 'second line')
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
@@ -490,6 +692,20 @@ Describe 'Invoke-WinPushScript' {
         $summaryRows[0].StdErrPath | Should Be $result.StdErrPath
         (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'first line,second line'
         @(Get-Content -LiteralPath $result.StdErrPath).Count | Should Be 0
+    }
+
+    It 'writes script-attached logs under the captured script artifact folder' {
+        $fixtureScript = Join-Path -Path $TestDrive -ChildPath 'Install-EA.ps1'
+        Set-Content -LiteralPath $fixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $fixtureScript -CaptureOutput -Logs -OutputRoot $outputRoot
+
+        $result.Succeeded | Should Be $true
+        Test-Path -LiteralPath $result.ResultPath -PathType Leaf | Should Be $true
+        $script:CopiedLogComputerDirectories[0] | Should Be $result.ComputerDirectory
+        $result.Logs[0].LocalPath | Should Be (Join-Path -Path (Join-Path -Path $result.ComputerDirectory -ChildPath 'Logs') -ChildPath 'script.log')
+        $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
     }
 
     It 'captures direct ComputerName array output under one shared run folder' {
@@ -647,6 +863,14 @@ Describe 'Invoke-WinPushScript' {
         { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -CaptureOutput -OutputRoot '   ' } | Should Throw 'OutputRoot must not be empty.'
 
         @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
+    It 'rejects whitespace output root before opening a session when logs are requested' {
+        { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Logs -OutputRoot '   ' } | Should Throw 'OutputRoot must not be empty.'
+
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:CopiedLogSessions).Count | Should Be 0
         @($script:RemovedSessionIds).Count | Should Be 0
     }
 
