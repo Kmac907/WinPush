@@ -1,8 +1,8 @@
-$script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..\src\WinPush')
-$script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Targeting\Resolve-WinPushTarget.ps1'
-$script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushExecutionResult.ps1'
-$script:PsrpCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Copy-WinPushPsrpItem.ps1'
-$script:CopyCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Public\Copy-WinPushItem.ps1'
+$script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..')
+$script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Targeting\Resolve-WinPushTarget.ps1'
+$script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushExecutionResult.ps1'
+$script:PsrpCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Copy-WinPushPsrpItem.ps1'
+$script:CopyCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Public\Copy-WinPushItem.ps1'
 
 . $script:ResolverPath
 . $script:ResultFactoryPath

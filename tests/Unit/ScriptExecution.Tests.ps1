@@ -1,13 +1,13 @@
-$script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..\src\WinPush')
-$script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Targeting\Resolve-WinPushTarget.ps1'
-$script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushExecutionResult.ps1'
-$script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushLogResult.ps1'
-$script:ArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
-$script:PsrpScriptPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Invoke-WinPushPsrpScript.ps1'
-$script:ScriptLogDirectoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\Get-WinPushScriptLogDirectory.ps1'
-$script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\New-WinPushLogArtifactDirectory.ps1'
-$script:PsrpLogCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\Copy-WinPushPsrpLogDirectory.ps1'
-$script:ScriptCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Public\Invoke-WinPushScript.ps1'
+$script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..')
+$script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Targeting\Resolve-WinPushTarget.ps1'
+$script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushExecutionResult.ps1'
+$script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushLogResult.ps1'
+$script:ArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
+$script:PsrpScriptPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushPsrpScript.ps1'
+$script:ScriptLogDirectoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\Get-WinPushScriptLogDirectory.ps1'
+$script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\New-WinPushLogArtifactDirectory.ps1'
+$script:PsrpLogCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\Copy-WinPushPsrpLogDirectory.ps1'
+$script:ScriptCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Public\Invoke-WinPushScript.ps1'
 
 . $script:ResolverPath
 . $script:ResultFactoryPath

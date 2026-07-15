@@ -1,7 +1,8 @@
 Set-StrictMode -Version Latest
 
-$privatePath = Join-Path -Path $PSScriptRoot -ChildPath 'Private'
-$publicPath = Join-Path -Path $PSScriptRoot -ChildPath 'Public'
+$sourceRoot = Join-Path -Path $PSScriptRoot -ChildPath 'src'
+$privatePath = Join-Path -Path $sourceRoot -ChildPath 'Private'
+$publicPath = Join-Path -Path $sourceRoot -ChildPath 'Public'
 
 foreach ($sourcePath in @($privatePath, $publicPath)) {
     if (-not (Test-Path -LiteralPath $sourcePath -PathType Container)) {

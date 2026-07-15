@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$manifestPath = Join-Path -Path $repoRoot -ChildPath 'src\WinPush\WinPush.psd1'
+$manifestPath = Join-Path -Path $repoRoot -ChildPath 'WinPush.psd1'
 $moduleName = 'WinPush'
 $srcPath = Join-Path -Path $repoRoot -ChildPath 'src'
 $testsPath = Join-Path -Path $repoRoot -ChildPath 'tests'

@@ -1,12 +1,12 @@
-$script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..\src\WinPush')
-$script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Targeting\Resolve-WinPushTarget.ps1'
-$script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushExecutionResult.ps1'
-$script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushLogResult.ps1'
-$script:PsrpCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Copy-WinPushPsrpItem.ps1'
-$script:PsrpLogMetadataPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\Get-WinPushPsrpLogFileInfo.ps1'
-$script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\New-WinPushLogArtifactDirectory.ps1'
-$script:PsrpLogCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\Copy-WinPushPsrpLogDirectory.ps1'
-$script:LogCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Public\Get-WinPushLog.ps1'
+$script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..')
+$script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Targeting\Resolve-WinPushTarget.ps1'
+$script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushExecutionResult.ps1'
+$script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushLogResult.ps1'
+$script:PsrpCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Copy-WinPushPsrpItem.ps1'
+$script:PsrpLogMetadataPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\Get-WinPushPsrpLogFileInfo.ps1'
+$script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\New-WinPushLogArtifactDirectory.ps1'
+$script:PsrpLogCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\Copy-WinPushPsrpLogDirectory.ps1'
+$script:LogCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Public\Get-WinPushLog.ps1'
 
 . $script:ResolverPath
 . $script:ResultFactoryPath

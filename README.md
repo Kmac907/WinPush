@@ -28,11 +28,10 @@ Out of scope:
 WinPush/
 ├─ README.md
 ├─ src/
-│  └─ WinPush/
-│     ├─ WinPush.psd1
-│     ├─ WinPush.psm1
-│     ├─ Public/
-│     └─ Private/
+│  ├─ Public/
+│  └─ Private/
+├─ WinPush.psd1
+├─ WinPush.psm1
 └─ tests/
    └─ Unit/
 ```
@@ -114,7 +113,7 @@ Planned defaults:
 From this module folder:
 
 ```powershell
-Import-Module .\src\WinPush\WinPush.psd1 -Force
+Import-Module .\WinPush.psd1 -Force
 ```
 
 Verify exported commands:
@@ -140,7 +139,7 @@ The examples below assume `PC01` is a Windows target reachable over WinRM/PSRP a
 Set up the local session:
 
 ```powershell
-Import-Module .\src\WinPush\WinPush.psd1 -Force
+Import-Module .\WinPush.psd1 -Force
 
 $ComputerName = 'PC01'
 $OutputRoot = 'C:\WinPush'
@@ -279,8 +278,8 @@ The gate validates the manifest, imports the module twice, runs PSScriptAnalyzer
 The import foundation can also be checked manually with:
 
 ```powershell
-Test-ModuleManifest .\src\WinPush\WinPush.psd1
-Import-Module .\src\WinPush\WinPush.psd1 -Force
+Test-ModuleManifest .\WinPush.psd1
+Import-Module .\WinPush.psd1 -Force
 ```
 
 ## Maturity
@@ -293,7 +292,7 @@ The module foundation, result contracts, target resolution, connectivity checks 
 
 Current version: `0.1.0`
 
-Version source: `src/WinPush/WinPush.psd1`
+Version source: `WinPush.psd1`
 
 ## Ownership And Support
 

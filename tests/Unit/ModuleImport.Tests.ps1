@@ -1,4 +1,4 @@
-$script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..\src\WinPush')
+$script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..')
 $script:ManifestPath = Join-Path -Path $script:ModuleRoot -ChildPath 'WinPush.psd1'
 
 Describe 'WinPush module import foundation' {
