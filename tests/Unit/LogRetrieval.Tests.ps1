@@ -1,11 +1,15 @@
 $script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..\src\WinPush')
 $script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Targeting\Resolve-WinPushTarget.ps1'
 $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushExecutionResult.ps1'
+$script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushLogResult.ps1'
+$script:PsrpCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Copy-WinPushPsrpItem.ps1'
 $script:PsrpLogMetadataPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\Get-WinPushPsrpLogFileInfo.ps1'
 $script:LogCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Public\Get-WinPushLog.ps1'
 
 . $script:ResolverPath
 . $script:ResultFactoryPath
+. $script:LogResultFactoryPath
+. $script:PsrpCopyPath
 . $script:PsrpLogMetadataPath
 . $script:LogCommandPath
 
@@ -105,6 +109,11 @@ Describe 'Get-WinPushLog' {
         $script:RemovedSessionIds = @()
         $script:LogMetadataSessions = @()
         $script:LogMetadataRemoteDirectories = @()
+        $script:CopySessions = @()
+        $script:CopyRemotePaths = @()
+        $script:CopyDestinations = @()
+        $script:CopyDirections = @()
+        $script:CopyFailures = @{}
         $script:SessionToReturn = [pscustomobject] @{ Id = 801; ComputerName = 'PC-001' }
         $script:NewPSSessionError = $null
         $script:LogMetadataError = $null
@@ -151,6 +160,24 @@ Describe 'Get-WinPushLog' {
         return $script:LogMetadataToReturn
     }
 
+    Mock Copy-WinPushPsrpItem {
+        param(
+            $Session,
+            [string] $Path,
+            [string] $Destination,
+            [string] $Direction
+        )
+
+        $script:CopySessions += $Session
+        $script:CopyRemotePaths += $Path
+        $script:CopyDestinations += $Destination
+        $script:CopyDirections += $Direction
+
+        if ($script:CopyFailures.ContainsKey($Path)) {
+            throw $script:CopyFailures[$Path]
+        }
+    }
+
     Mock Remove-PSSession {
         $script:RemovedSessionIds += $Id
     }
@@ -167,6 +194,8 @@ Describe 'Get-WinPushLog' {
         $computerNameParameterAttribute.ValueFromPipelineByPropertyName | Should Be $false
         ($command.Parameters.Keys -contains 'RemoteDirectory') | Should Be $true
         $command.Parameters['RemoteDirectory'].ParameterType.FullName | Should Be 'System.String'
+        ($command.Parameters.Keys -contains 'OutputRoot') | Should Be $true
+        $command.Parameters['OutputRoot'].ParameterType.FullName | Should Be 'System.String'
         ($command.Parameters.Keys -contains 'Credential') | Should Be $true
         $command.Parameters['Credential'].ParameterType.FullName | Should Be 'System.Management.Automation.PSCredential'
         ($command.Parameters.Keys -contains 'HostFile') | Should Be $false
@@ -200,7 +229,15 @@ Describe 'Get-WinPushLog' {
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
-    It 'returns immediate file metadata in Output without log copy results' {
+    It 'rejects empty output roots before opening a session' {
+        $result = Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -OutputRoot ' '
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'OutputRoot must not be empty.'
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'copies immediate files to the local log folder and returns log results' {
         $metadata = @(
             [pscustomobject] [ordered] @{
                 RemoteDirectory  = 'C:\ProgramData\EA\Logs\App'
@@ -219,7 +256,7 @@ Describe 'Get-WinPushLog' {
         )
         $script:LogMetadataToReturn = $metadata
 
-        $result = Get-WinPushLog -ComputerName " $($script:TargetName) " -RemoteDirectory 'C:\ProgramData\EA\Logs\App'
+        $result = Get-WinPushLog -ComputerName " $($script:TargetName) " -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -OutputRoot $TestDrive
 
         $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
         $result.ComputerName | Should Be 'PC-001'
@@ -229,24 +266,79 @@ Describe 'Get-WinPushLog' {
         $result.ExitCode | Should Be 0
         @($result.Output).Count | Should Be 2
         ($result.Output.Name -join ',') | Should Be 'install.log,repair.log'
-        @($result.Logs).Count | Should Be 0
-        @($result.CopiedLogPaths).Count | Should Be 0
+        @($result.Logs).Count | Should Be 2
+        @($result.CopiedLogPaths).Count | Should Be 2
         $null -eq $result.ResultPath | Should Be $true
+        $result.RunDirectory.StartsWith($TestDrive) | Should Be $true
+        $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
+        $expectedLogDirectory = Join-Path -Path $result.ComputerDirectory -ChildPath 'Logs'
+        (Test-Path -LiteralPath $expectedLogDirectory -PathType Container) | Should Be $true
+        $result.Logs[0].PSTypeNames[0] | Should Be 'WinPush.LogResult'
+        $result.Logs[0].Copied | Should Be $true
+        $result.Logs[0].LocalPath | Should Be (Join-Path -Path $expectedLogDirectory -ChildPath 'install.log')
+        $result.Logs[1].LocalPath | Should Be (Join-Path -Path $expectedLogDirectory -ChildPath 'repair.log')
+        ($result.CopiedLogPaths -join ',') | Should Be ($result.Logs.LocalPath -join ',')
         @($script:NewPSSessionComputerNames).Count | Should Be 1
         $script:NewPSSessionComputerNames[0] | Should Be 'PC-001'
         @($script:LogMetadataRemoteDirectories).Count | Should Be 1
         $script:LogMetadataRemoteDirectories[0] | Should Be 'C:\ProgramData\EA\Logs\App'
+        @($script:CopyRemotePaths).Count | Should Be 2
+        ($script:CopyRemotePaths -join ',') | Should Be 'C:\ProgramData\EA\Logs\App\install.log,C:\ProgramData\EA\Logs\App\repair.log'
+        ($script:CopyDirections -join ',') | Should Be 'Download,Download'
+        $script:CopyDestinations[0] | Should Be $result.Logs[0].LocalPath
     }
 
     It 'returns success with empty Output and Logs for an empty valid remote directory' {
         $script:LogMetadataToReturn = @()
 
-        $result = Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\Empty'
+        $result = Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\Empty' -OutputRoot $TestDrive
 
         $result.Succeeded | Should Be $true
         $result.ExitCode | Should Be 0
         @($result.Output).Count | Should Be 0
         @($result.Logs).Count | Should Be 0
+        @($result.CopiedLogPaths).Count | Should Be 0
+        $result.RunDirectory.StartsWith($TestDrive) | Should Be $true
+        (Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'Logs') -PathType Container) | Should Be $true
+        @($script:CopyRemotePaths).Count | Should Be 0
+    }
+
+    It 'continues after one file copy failure and preserves successful copy results' {
+        $metadata = @(
+            [pscustomobject] [ordered] @{
+                RemoteDirectory  = 'C:\ProgramData\EA\Logs\App'
+                RemotePath       = 'C:\ProgramData\EA\Logs\App\install.log'
+                Name             = 'install.log'
+                Length           = 12
+                LastWriteTimeUtc = [datetime]::UtcNow
+            },
+            [pscustomobject] [ordered] @{
+                RemoteDirectory  = 'C:\ProgramData\EA\Logs\App'
+                RemotePath       = 'C:\ProgramData\EA\Logs\App\repair.log'
+                Name             = 'repair.log'
+                Length           = 9
+                LastWriteTimeUtc = [datetime]::UtcNow
+            }
+        )
+        $script:LogMetadataToReturn = $metadata
+        $script:CopyFailures['C:\ProgramData\EA\Logs\App\repair.log'] = 'Access denied copying repair.log'
+
+        $result = Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'One or more log files failed to copy.'
+        @($result.Output).Count | Should Be 2
+        @($result.Logs).Count | Should Be 2
+        $result.Logs[0].Copied | Should Be $true
+        $result.Logs[1].Copied | Should Be $false
+        $null -eq $result.Logs[1].LocalPath | Should Be $true
+        $result.Logs[1].Error | Should Be 'Access denied copying repair.log'
+        @($result.CopiedLogPaths).Count | Should Be 1
+        $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
+        $result.Errors[0] | Should Be 'Access denied copying repair.log'
+        @($script:CopyRemotePaths).Count | Should Be 2
+        @($script:RemovedSessionIds).Count | Should Be 1
     }
 
     It 'returns a failed result when remote directory validation fails' {
@@ -263,7 +355,7 @@ Describe 'Get-WinPushLog' {
     }
 
     It 'removes the session after successful enumeration' {
-        Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\App' | Out-Null
+        Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -OutputRoot $TestDrive | Out-Null
 
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be 801
@@ -274,7 +366,7 @@ Describe 'Get-WinPushLog' {
         $credential = Get-TestCredential -Secret $secret
         $script:NewPSSessionError = "authentication failed for $secret"
 
-        $result = Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -Credential $credential
+        $result = Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -Credential $credential -OutputRoot $TestDrive
         $diagnosticText = @(
             $result.ErrorMessage
             @($result.Errors)
@@ -290,7 +382,7 @@ Describe 'Get-WinPushLog' {
     It 'passes the supplied credential object unchanged to New-PSSession' {
         $credential = Get-TestCredential -Secret 'Distinctive-7.1-Credential-Secret!'
 
-        $result = Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -Credential $credential
+        $result = Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -Credential $credential -OutputRoot $TestDrive
 
         $result.Succeeded | Should Be $true
         @($script:NewPSSessionCredentials).Count | Should Be 1
@@ -298,7 +390,7 @@ Describe 'Get-WinPushLog' {
     }
 
     It 'does not send a credential argument to New-PSSession when omitted' {
-        Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\App' | Out-Null
+        Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -OutputRoot $TestDrive | Out-Null
 
         @($script:NewPSSessionCredentialSupplied).Count | Should Be 1
         $script:NewPSSessionCredentialSupplied[0] | Should Be $false
