@@ -23,7 +23,7 @@
     PrivateData          = @{
         PSData = @{
             Tags       = @('Windows', 'PSRP', 'WinRM', 'Administration')
-            ProjectUri = ''
+            ProjectUri = 'https://dev.azure.com/scfitops/Endpoint%20Engineering/_git/Modules'
         }
     }
 }
