@@ -4,6 +4,8 @@ $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Priva
 $script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushLogResult.ps1'
 $script:PsrpCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Copy-WinPushPsrpItem.ps1'
 $script:PsrpLogMetadataPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\Get-WinPushPsrpLogFileInfo.ps1'
+$script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\New-WinPushLogArtifactDirectory.ps1'
+$script:PsrpLogCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\Copy-WinPushPsrpLogDirectory.ps1'
 $script:LogCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Public\Get-WinPushLog.ps1'
 
 . $script:ResolverPath
@@ -11,6 +13,8 @@ $script:LogCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Public\G
 . $script:LogResultFactoryPath
 . $script:PsrpCopyPath
 . $script:PsrpLogMetadataPath
+. $script:LogArtifactPath
+. $script:PsrpLogCopyPath
 . $script:LogCommandPath
 
 function Get-TestCredential {

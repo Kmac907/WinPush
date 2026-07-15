@@ -1,15 +1,23 @@
 $script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..\src\WinPush')
 $script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Targeting\Resolve-WinPushTarget.ps1'
 $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushExecutionResult.ps1'
+$script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Results\New-WinPushLogResult.ps1'
 $script:ArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
 $script:PsrpCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Execution\Invoke-WinPushPsrpCommand.ps1'
+$script:CommandLogDirectoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\Get-WinPushCommandLogDirectory.ps1'
+$script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\New-WinPushLogArtifactDirectory.ps1'
+$script:PsrpLogCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Private\Logs\Copy-WinPushPsrpLogDirectory.ps1'
 $script:CommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'Public\Invoke-WinPushCommand.ps1'
 $script:FixtureRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\Fixtures\TargetResolution')
 
 . $script:ResolverPath
 . $script:ResultFactoryPath
+. $script:LogResultFactoryPath
 . $script:ArtifactPath
 . $script:PsrpCommandPath
+. $script:CommandLogDirectoryPath
+. $script:LogArtifactPath
+. $script:PsrpLogCopyPath
 . $script:CommandPath
 
 function New-TestCredential {
@@ -48,6 +56,13 @@ Describe 'Invoke-WinPushCommand' {
         $script:InvokeCommandThrowsByComputerName = @{}
         $script:NewPSSessionCredentialSupplied = @()
         $script:NewPSSessionCredentials = @()
+        $script:OperationOrder = @()
+        $script:CopiedLogSessions = @()
+        $script:CopiedLogComputerNames = @()
+        $script:CopiedLogRemoteDirectories = @()
+        $script:CopiedLogRunDirectories = @()
+        $script:CopiedLogComputerDirectories = @()
+        $script:LogCopyError = $null
     }
 
     Mock New-PSSession {
@@ -91,6 +106,7 @@ Describe 'Invoke-WinPushCommand' {
         }
 
         $script:InvokedScriptBlocks += $ScriptBlock.ToString()
+        $script:OperationOrder += ('Command:{0}' -f $Session.ComputerName)
 
         if ($null -ne $script:InvokeCommandError) {
             throw $script:InvokeCommandError
@@ -117,6 +133,68 @@ Describe 'Invoke-WinPushCommand' {
         }
     }
 
+    Mock Copy-WinPushPsrpLogDirectory {
+        param(
+            $Session,
+            [string] $ComputerName,
+            [string] $RemoteDirectory,
+            [string] $OutputRoot,
+            [AllowNull()]
+            [string] $RunDirectory,
+            [AllowNull()]
+            [string] $ComputerDirectory
+        )
+
+        $script:CopiedLogSessions += $Session
+        $script:CopiedLogComputerNames += $ComputerName
+        $script:CopiedLogRemoteDirectories += $RemoteDirectory
+        $script:CopiedLogRunDirectories += $RunDirectory
+        $script:CopiedLogComputerDirectories += $ComputerDirectory
+        $script:OperationOrder += ('Logs:{0}' -f $Session.ComputerName)
+
+        if ($null -ne $script:LogCopyError) {
+            throw $script:LogCopyError
+        }
+
+        $effectiveRunDirectory = if ([string]::IsNullOrWhiteSpace($RunDirectory)) {
+            Join-Path -Path $OutputRoot -ChildPath 'run-logs'
+        }
+        else {
+            $RunDirectory
+        }
+        $effectiveComputerDirectory = if ([string]::IsNullOrWhiteSpace($ComputerDirectory)) {
+            Join-Path -Path $effectiveRunDirectory -ChildPath $ComputerName
+        }
+        else {
+            $ComputerDirectory
+        }
+        $localPath = Join-Path -Path (Join-Path -Path $effectiveComputerDirectory -ChildPath 'Logs') -ChildPath 'command.log'
+        $remotePath = Join-Path -Path $RemoteDirectory -ChildPath 'command.log'
+        $logResult = New-WinPushLogResult `
+            -ComputerName $ComputerName `
+            -RemotePath $remotePath `
+            -LocalPath $localPath `
+            -Copied $true
+
+        [pscustomobject] [ordered] @{
+            FileMetadata      = @(
+                [pscustomobject] [ordered] @{
+                    RemoteDirectory  = $RemoteDirectory
+                    RemotePath       = $remotePath
+                    Name             = 'command.log'
+                    Length           = 12
+                    LastWriteTimeUtc = [datetime]::UtcNow
+                }
+            )
+            Logs              = @($logResult)
+            Errors            = @()
+            CopiedLogPaths    = @($localPath)
+            RunDirectory      = $effectiveRunDirectory
+            ComputerDirectory = $effectiveComputerDirectory
+            LogDirectory      = Join-Path -Path $effectiveComputerDirectory -ChildPath 'Logs'
+        }
+    }
+
     Mock Remove-PSSession {
         $script:RemovedSessionIds += $Id
     }
@@ -135,6 +213,7 @@ Describe 'Invoke-WinPushCommand' {
         $result.Output[0] | Should Be 'remote output'
         @($result.Errors).Count | Should Be 0
         @($result.Logs).Count | Should Be 0
+        @($script:CopiedLogSessions).Count | Should Be 0
         $null -eq $result.RunDirectory | Should Be $true
         $null -eq $result.ComputerDirectory | Should Be $true
         $null -eq $result.StdOutPath | Should Be $true
@@ -191,6 +270,21 @@ Describe 'Invoke-WinPushCommand' {
 
         ($command.Parameters.Keys -contains 'Credential') | Should Be $true
         $command.Parameters['Credential'].ParameterType.FullName | Should Be 'System.Management.Automation.PSCredential'
+    }
+
+    It 'has optional command-attached log collection without arbitrary log directory passthrough' {
+        $command = Get-Command -Name Invoke-WinPushCommand
+
+        ($command.Parameters.Keys -contains 'Logs') | Should Be $true
+        $command.Parameters['Logs'].ParameterType.FullName | Should Be 'System.Management.Automation.SwitchParameter'
+        ($command.Parameters.Keys -contains 'LogDirectory') | Should Be $false
+        ($command.Parameters.Keys -contains 'RemoteDirectory') | Should Be $false
+    }
+
+    It 'derives command-attached log directories from the first command name' {
+        Get-WinPushCommandLogDirectory -Command 'hostname' | Should Be 'C:\ProgramData\EA\Logs\hostname'
+        Get-WinPushCommandLogDirectory -Command 'cmd.exe /d /s /c "echo winpush"' | Should Be 'C:\ProgramData\EA\Logs\cmd'
+        Get-WinPushCommandLogDirectory -Command '$value = 1' | Should Be 'C:\ProgramData\EA\Logs\Command'
     }
 
     It 'does not send a credential argument to New-PSSession when omitted' {
@@ -409,6 +503,103 @@ Describe 'Invoke-WinPushCommand' {
         ($script:RemovedSessionIds -join ',') | Should Be '201,203'
     }
 
+    It 'copies command-attached logs after a successful command using the same PSSession' {
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Logs -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $true
+        $result.Output[0] | Should Be 'remote output'
+        @($result.Errors).Count | Should Be 0
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].PSTypeNames[0] | Should Be 'WinPush.LogResult'
+        $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\hostname\command.log'
+        $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
+        $result.RunDirectory | Should Be (Join-Path -Path $TestDrive -ChildPath 'run-logs')
+        $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
+        @($script:CopiedLogSessions).Count | Should Be 1
+        [object]::ReferenceEquals($script:CopiedLogSessions[0], $script:SessionToReturn) | Should Be $true
+        $script:CopiedLogRemoteDirectories[0] | Should Be 'C:\ProgramData\EA\Logs\hostname'
+        ($script:OperationOrder -join ',') | Should Be 'Command:PC-001,Logs:PC-001'
+    }
+
+    It 'copies command-attached logs after an error-emitting command without replacing command output or errors' {
+        $script:InvokeCommandOutput = @('before error')
+        $script:InvokeCommandErrors = @('command failed')
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'Write-Error "command failed"' -Logs -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'command failed'
+        $result.Output[0] | Should Be 'before error'
+        $result.Errors[0] | Should Be 'command failed'
+        @($result.Logs).Count | Should Be 1
+        $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
+        $script:CopiedLogRemoteDirectories[0] | Should Be 'C:\ProgramData\EA\Logs\Write-Error'
+        ($script:OperationOrder -join ',') | Should Be 'Command:PC-001,Logs:PC-001'
+    }
+
+    It 'records command-attached log source failures without changing primary command success' {
+        $script:LogCopyError = 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\hostname'
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Logs -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        [string]::IsNullOrEmpty($result.ErrorMessage) | Should Be $true
+        @($result.Output).Count | Should Be 1
+        @($result.Errors).Count | Should Be 0
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].Copied | Should Be $false
+        $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\hostname'
+        $result.Logs[0].Error | Should Be 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\hostname'
+        @($result.CopiedLogPaths).Count | Should Be 0
+    }
+
+    It 'shares one log run folder across direct ComputerName command targets' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+
+        $results = @(Invoke-WinPushCommand -ComputerName @('PC-001', 'PC-002') -Command 'hostname' -Logs -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
+        $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        ($script:CopiedLogComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        ($script:CopiedLogRemoteDirectories -join ',') | Should Be 'C:\ProgramData\EA\Logs\hostname,C:\ProgramData\EA\Logs\hostname'
+    }
+
+    It 'copies command-attached logs for pipeline targets' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+
+        $results = @(@('PC-001', 'PC-002') | Invoke-WinPushCommand -Command 'hostname' -Logs -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($script:CopiedLogComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+    }
+
+    It 'copies command-attached logs for host file targets' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'duplicate-comment-hosts.txt'
+
+        $results = @(Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname' -Logs -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($script:CopiedLogComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+    }
+
     It 'captures command output to one target artifact folder when requested' {
         $script:InvokeCommandOutput = @('first line', 'second line')
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
@@ -449,6 +640,18 @@ Describe 'Invoke-WinPushCommand' {
         @(Get-Content -LiteralPath $result.StdErrPath).Count | Should Be 0
         @($result.Output).Count | Should Be 2
         $result.Output[0] | Should Be 'first line'
+    }
+
+    It 'writes command-attached logs under the captured command artifact folder' {
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -CaptureOutput -Logs -OutputRoot $outputRoot
+
+        $result.Succeeded | Should Be $true
+        Test-Path -LiteralPath $result.ResultPath -PathType Leaf | Should Be $true
+        $script:CopiedLogComputerDirectories[0] | Should Be $result.ComputerDirectory
+        $result.Logs[0].LocalPath | Should Be (Join-Path -Path (Join-Path -Path $result.ComputerDirectory -ChildPath 'Logs') -ChildPath 'command.log')
+        $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
     }
 
     It 'captures direct ComputerName array output under one shared run folder' {
@@ -640,6 +843,14 @@ Describe 'Invoke-WinPushCommand' {
         { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -CaptureOutput -OutputRoot '   ' } | Should Throw 'OutputRoot must not be empty.'
 
         @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
+    It 'rejects whitespace output root before opening a session when logs are requested' {
+        { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Logs -OutputRoot '   ' } | Should Throw 'OutputRoot must not be empty.'
+
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:CopiedLogSessions).Count | Should Be 0
         @($script:RemovedSessionIds).Count | Should Be 0
     }
 
