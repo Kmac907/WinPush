@@ -2,7 +2,7 @@
 
 ## Overview
 
-`WinPush` is a PowerShell 7.6 script module for Windows administrators and automation engineers. The MVP will use PSRP over WinRM to test targets, run command text and local scripts, transfer individual files, and retrieve text logs from an explicit remote directory.
+`WinPush` is a PowerShell 7.6 script module for Windows administrators and automation engineers. The MVP uses PSRP over WinRM to test targets, run command text and local scripts, transfer individual files, and retrieve text logs from an explicit remote directory.
 
 The module currently exports completed PSRP connectivity checks, `Invoke-WinPushCommand` execution for direct, pipeline, or host-file targets with optional captured-output artifacts and command-attached logs, direct, pipeline, or host-file local `.ps1` execution through `Invoke-WinPushScript` with optional credential support, captured-output artifacts, and script-attached logs, single-file PSRP upload/download through `Copy-WinPushItem`, and direct, pipeline, or host-file remote log directory copy through `Get-WinPushLog`.
 
@@ -133,6 +133,126 @@ Invoke-WinPushScript
 Test-WinPushTarget
 ```
 
+## Runnable MVP Examples
+
+The examples below assume `PC01` is a Windows target reachable over WinRM/PSRP and that the caller is authorized to create files under `C:\Windows\Temp` and `C:\ProgramData\EA\Logs` on that target. Replace `PC01` with a reachable target in your environment.
+
+Set up the local session:
+
+```powershell
+Import-Module .\src\WinPush\WinPush.psd1 -Force
+
+$ComputerName = 'PC01'
+$OutputRoot = 'C:\WinPush'
+```
+
+Authentication with the current Windows identity:
+
+```powershell
+Test-WinPushTarget -ComputerName $ComputerName
+```
+
+Authentication with a supplied `PSCredential`:
+
+```powershell
+$Credential = Get-Credential
+Test-WinPushTarget -ComputerName $ComputerName -Credential $Credential
+Invoke-WinPushCommand -ComputerName $ComputerName -Credential $Credential -Command '$env:COMPUTERNAME'
+```
+
+Command execution with captured output artifacts:
+
+```powershell
+Invoke-WinPushCommand `
+  -ComputerName $ComputerName `
+  -Command 'hostname' `
+  -CaptureOutput `
+  -OutputRoot $OutputRoot
+```
+
+Local script execution with captured output artifacts:
+
+```powershell
+$ScriptPath = Join-Path $env:TEMP 'WinPush-Example.ps1'
+@'
+Write-Output "WinPush script ran on $env:COMPUTERNAME"
+'@ | Set-Content -LiteralPath $ScriptPath -Encoding UTF8
+
+Invoke-WinPushScript `
+  -ComputerName $ComputerName `
+  -ScriptPath $ScriptPath `
+  -CaptureOutput `
+  -OutputRoot $OutputRoot
+```
+
+Single-file upload and download:
+
+```powershell
+Invoke-WinPushCommand `
+  -ComputerName $ComputerName `
+  -Command 'New-Item -ItemType Directory -Force -Path C:\Windows\Temp\WinPushExample | Out-Null'
+
+$LocalFile = Join-Path $env:TEMP 'WinPush-Payload.txt'
+$RemoteFile = 'C:\Windows\Temp\WinPushExample\payload.txt'
+$DownloadedFile = Join-Path $env:TEMP 'WinPush-Payload.downloaded.txt'
+
+'WinPush file copy example' | Set-Content -LiteralPath $LocalFile -Encoding UTF8
+
+Copy-WinPushItem -ComputerName $ComputerName -Path $LocalFile -Destination $RemoteFile
+Copy-WinPushItem -ComputerName $ComputerName -Path $RemoteFile -Destination $DownloadedFile -Direction Download
+```
+
+Standalone log retrieval from an explicit remote directory:
+
+```powershell
+$StandaloneLogDirectory = 'C:\Windows\Temp\WinPushStandaloneLogs'
+
+Invoke-WinPushCommand `
+  -ComputerName $ComputerName `
+  -Command "New-Item -ItemType Directory -Force -Path $StandaloneLogDirectory | Out-Null; Set-Content -Path $StandaloneLogDirectory\standalone.log -Value 'standalone log entry'"
+
+Get-WinPushLog `
+  -ComputerName $ComputerName `
+  -RemoteDirectory $StandaloneLogDirectory `
+  -OutputRoot $OutputRoot
+```
+
+Command execution with attached command logs:
+
+```powershell
+$CommandWithLog = @'
+New-Item -ItemType Directory -Force -Path C:\ProgramData\EA\Logs\New-Item | Out-Null
+Set-Content -Path C:\ProgramData\EA\Logs\New-Item\command.log -Value "attached command log entry"
+hostname
+'@
+
+Invoke-WinPushCommand `
+  -ComputerName $ComputerName `
+  -Command $CommandWithLog `
+  -CaptureOutput `
+  -Logs `
+  -OutputRoot $OutputRoot
+```
+
+Script execution with attached script logs:
+
+```powershell
+$AttachedScriptPath = Join-Path $env:TEMP 'WinPush-AttachedLogExample.ps1'
+@'
+$LogDirectory = 'C:\ProgramData\EA\Logs\WinPush-AttachedLogExample'
+New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
+Set-Content -Path (Join-Path $LogDirectory 'script.log') -Value 'attached script log entry'
+Write-Output "script attached log example completed"
+'@ | Set-Content -LiteralPath $AttachedScriptPath -Encoding UTF8
+
+Invoke-WinPushScript `
+  -ComputerName $ComputerName `
+  -ScriptPath $AttachedScriptPath `
+  -CaptureOutput `
+  -Logs `
+  -OutputRoot $OutputRoot
+```
+
 ## Output
 
 `Test-WinPushTarget`, `Invoke-WinPushCommand`, `Invoke-WinPushScript`, `Copy-WinPushItem`, and `Get-WinPushLog` return structured PowerShell objects with `PSTypeName = WinPush.ExecutionResult`.
@@ -167,7 +287,7 @@ Import-Module .\src\WinPush\WinPush.psd1 -Force
 
 `Experimental`
 
-The module foundation, result contracts, target resolution, connectivity checks across direct, pipeline, and host-file targets, credential pass-through behavior, direct, pipeline, and host-file target command summary execution with credential support, explicit cmd.exe command text through PSRP, command error-stream semantics, command capture-output artifacts, command-attached log copy, direct, pipeline, or host-file local `.ps1` execution with credential support, single-file PSRP upload/download transfer, and direct, pipeline, or host-file remote log directory copy exist. Automatic cmd.exe wrapping, native command transports, recursive transfer, multi-target transfer, recursive log enumeration, script-attached log copy, and package workflow execution are not yet implemented.
+The module foundation, result contracts, target resolution, connectivity checks across direct, pipeline, and host-file targets, credential pass-through behavior, direct, pipeline, and host-file target command summary execution with credential support, explicit cmd.exe command text through PSRP, command error-stream semantics, command capture-output artifacts, command-attached log copy, direct, pipeline, or host-file local `.ps1` execution with credential support, script capture-output artifacts, script-attached log copy, single-file PSRP upload/download transfer, and direct, pipeline, or host-file remote log directory copy exist. Automatic cmd.exe wrapping, native command transports, recursive transfer, multi-target transfer, recursive log enumeration, and package workflow execution are not yet implemented.
 
 ## Version
 
