@@ -116,6 +116,7 @@ Describe 'Get-WinPushLog' {
         $script:CopyFailures = @{}
         $script:SessionToReturn = [pscustomobject] @{ Id = 801; ComputerName = 'PC-001' }
         $script:NewPSSessionError = $null
+        $script:NewPSSessionFailures = @{}
         $script:LogMetadataError = $null
         $script:LogMetadataToReturn = @()
         $script:TargetName = 'PC-001'
@@ -139,6 +140,10 @@ Describe 'Get-WinPushLog' {
 
         if ($null -ne $script:NewPSSessionError) {
             throw $script:NewPSSessionError
+        }
+
+        if ($script:NewPSSessionFailures.ContainsKey($ComputerName)) {
+            throw $script:NewPSSessionFailures[$ComputerName]
         }
 
         return $script:SessionToReturn
@@ -182,23 +187,24 @@ Describe 'Get-WinPushLog' {
         $script:RemovedSessionIds += $Id
     }
 
-    It 'has the single-target public parameter contract for explicit remote directory enumeration' {
+    It 'has the public parameter contract for explicit remote directory retrieval across target sources' {
         $command = Get-Command -Name Get-WinPushLog
         $computerNameParameterAttribute = $command.Parameters['ComputerName'].Attributes |
             Where-Object { $_ -is [System.Management.Automation.ParameterAttribute] } |
             Select-Object -First 1
 
         ($command.Parameters.Keys -contains 'ComputerName') | Should Be $true
-        $command.Parameters['ComputerName'].ParameterType.FullName | Should Not Be 'System.String[]'
-        $computerNameParameterAttribute.ValueFromPipeline | Should Be $false
-        $computerNameParameterAttribute.ValueFromPipelineByPropertyName | Should Be $false
+        $command.Parameters['ComputerName'].ParameterType.FullName | Should Be 'System.String[]'
+        $computerNameParameterAttribute.ValueFromPipeline | Should Be $true
+        $computerNameParameterAttribute.ValueFromPipelineByPropertyName | Should Be $true
+        ($command.Parameters.Keys -contains 'HostFile') | Should Be $true
+        $command.Parameters['HostFile'].ParameterType.FullName | Should Be 'System.String'
         ($command.Parameters.Keys -contains 'RemoteDirectory') | Should Be $true
         $command.Parameters['RemoteDirectory'].ParameterType.FullName | Should Be 'System.String'
         ($command.Parameters.Keys -contains 'OutputRoot') | Should Be $true
         $command.Parameters['OutputRoot'].ParameterType.FullName | Should Be 'System.String'
         ($command.Parameters.Keys -contains 'Credential') | Should Be $true
         $command.Parameters['Credential'].ParameterType.FullName | Should Be 'System.Management.Automation.PSCredential'
-        ($command.Parameters.Keys -contains 'HostFile') | Should Be $false
         ($command.Parameters.Keys -contains 'Recurse') | Should Be $false
         ($command.Parameters.Keys -contains 'LogDirectory') | Should Be $false
     }
@@ -221,12 +227,29 @@ Describe 'Get-WinPushLog' {
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
-    It 'rejects array ComputerName input before opening a session' {
-        $result = Get-WinPushLog -ComputerName @($script:TargetName, $script:OtherTargetName) -RemoteDirectory 'C:\ProgramData\EA\Logs'
+    It 'runs direct ComputerName arrays in resolved order with one shared run folder' {
+        $script:LogMetadataToReturn = @(
+            [pscustomobject] [ordered] @{
+                RemoteDirectory  = 'C:\ProgramData\EA\Logs\App'
+                RemotePath       = 'C:\ProgramData\EA\Logs\App\install.log'
+                Name             = 'install.log'
+                Length           = 12
+                LastWriteTimeUtc = [datetime]::UtcNow
+            }
+        )
 
-        $result.Succeeded | Should Be $false
-        $result.ErrorMessage | Should Be 'Get-WinPushLog requires exactly one target.'
-        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        $results = @(Get-WinPushLog -ComputerName @(" $($script:TargetName) ", $script:TargetName.ToLowerInvariant(), $script:OtherTargetName) -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($results.Succeeded -join ',') | Should Be 'True,True'
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
+        $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        @($results[0].Logs).Count | Should Be 1
+        @($results[1].Logs).Count | Should Be 1
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        @($script:RemovedSessionIds).Count | Should Be 2
     }
 
     It 'rejects empty output roots before opening a session' {
@@ -341,6 +364,81 @@ Describe 'Get-WinPushLog' {
         @($script:RemovedSessionIds).Count | Should Be 1
     }
 
+    It 'continues to later direct ComputerName targets after one target session fails' {
+        $script:LogMetadataToReturn = @(
+            [pscustomobject] [ordered] @{
+                RemoteDirectory  = 'C:\ProgramData\EA\Logs\App'
+                RemotePath       = 'C:\ProgramData\EA\Logs\App\install.log'
+                Name             = 'install.log'
+                Length           = 12
+                LastWriteTimeUtc = [datetime]::UtcNow
+            }
+        )
+        $script:NewPSSessionFailures[$script:TargetName] = 'Unable to connect to PC-001'
+
+        $results = @(Get-WinPushLog -ComputerName @($script:TargetName, $script:OtherTargetName) -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[0].Succeeded | Should Be $false
+        $results[0].ErrorMessage | Should Be 'Unable to connect to PC-001'
+        @($results[0].Logs).Count | Should Be 0
+        @($results[0].Errors).Count | Should Be 1
+        $results[1].ComputerName | Should Be 'PC-002'
+        $results[1].Succeeded | Should Be $true
+        @($results[1].Logs).Count | Should Be 1
+        @($script:RemovedSessionIds).Count | Should Be 1
+    }
+
+    It 'runs pipeline ComputerName strings in resolved order' {
+        $script:LogMetadataToReturn = @()
+
+        $results = @(@($script:TargetName, $script:OtherTargetName) | Get-WinPushLog -RemoteDirectory 'C:\ProgramData\EA\Logs\Empty' -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($results.Succeeded -join ',') | Should Be 'True,True'
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+    }
+
+    It 'runs pipeline objects by ComputerName property in resolved order' {
+        $script:LogMetadataToReturn = @()
+        $targets = @(
+            [pscustomobject] @{ ComputerName = $script:TargetName },
+            [pscustomobject] @{ ComputerName = $script:OtherTargetName }
+        )
+
+        $results = @($targets | Get-WinPushLog -RemoteDirectory 'C:\ProgramData\EA\Logs\Empty' -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+    }
+
+    It 'runs host file targets and continues after one failed target' {
+        $script:LogMetadataToReturn = @()
+        $script:NewPSSessionFailures['WINPUSH-NO-SUCH-7-3'] = 'Host file target failed'
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'hosts.txt'
+        Set-Content -LiteralPath $hostFile -Value @(
+            '# comment'
+            'WINPUSH-NO-SUCH-7-3'
+            $script:TargetName
+            $script:TargetName.ToLowerInvariant()
+        ) -Encoding UTF8
+
+        $results = @(Get-WinPushLog -HostFile $hostFile -RemoteDirectory 'C:\ProgramData\EA\Logs\Empty' -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        $results[0].ComputerName | Should Be 'WINPUSH-NO-SUCH-7-3'
+        $results[0].Succeeded | Should Be $false
+        $results[0].ErrorMessage | Should Be 'Host file target failed'
+        $results[1].ComputerName | Should Be 'PC-001'
+        $results[1].Succeeded | Should Be $true
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'WINPUSH-NO-SUCH-7-3,PC-001'
+        @($script:RemovedSessionIds).Count | Should Be 1
+    }
+
     It 'returns a failed result when remote directory validation fails' {
         $script:LogMetadataError = 'RemoteDirectory was not found or is not a directory: C:\Missing'
 
@@ -382,11 +480,12 @@ Describe 'Get-WinPushLog' {
     It 'passes the supplied credential object unchanged to New-PSSession' {
         $credential = Get-TestCredential -Secret 'Distinctive-7.1-Credential-Secret!'
 
-        $result = Get-WinPushLog -ComputerName $script:TargetName -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -Credential $credential -OutputRoot $TestDrive
+        $results = @(Get-WinPushLog -ComputerName @($script:TargetName, $script:OtherTargetName) -RemoteDirectory 'C:\ProgramData\EA\Logs\App' -Credential $credential -OutputRoot $TestDrive)
 
-        $result.Succeeded | Should Be $true
-        @($script:NewPSSessionCredentials).Count | Should Be 1
+        ($results.Succeeded -join ',') | Should Be 'True,True'
+        @($script:NewPSSessionCredentials).Count | Should Be 2
         [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[1], $credential) | Should Be $true
     }
 
     It 'does not send a credential argument to New-PSSession when omitted' {
