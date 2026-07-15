@@ -62,6 +62,8 @@ Describe 'Invoke-WinPushScript' {
         $script:CopiedLogRunDirectories = @()
         $script:CopiedLogComputerDirectories = @()
         $script:LogCopyError = $null
+        $script:LogCopyReturnedLogs = $null
+        $script:LogCopyReturnedCopiedLogPaths = $null
         $script:FixtureScript = Join-Path -Path $TestDrive -ChildPath 'Invoke-WinPushScript-Fixture.ps1'
         Set-Content -LiteralPath $script:FixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
     }
@@ -177,6 +179,18 @@ Describe 'Invoke-WinPushScript' {
             -RemotePath $remotePath `
             -LocalPath $localPath `
             -Copied $true
+        $logs = if ($null -ne $script:LogCopyReturnedLogs) {
+            @($script:LogCopyReturnedLogs)
+        }
+        else {
+            @($logResult)
+        }
+        $copiedLogPaths = if ($null -ne $script:LogCopyReturnedCopiedLogPaths) {
+            @($script:LogCopyReturnedCopiedLogPaths)
+        }
+        else {
+            @($logs | Where-Object { $_.Copied } | ForEach-Object { $_.LocalPath })
+        }
 
         [pscustomobject] [ordered] @{
             FileMetadata      = @(
@@ -185,9 +199,9 @@ Describe 'Invoke-WinPushScript' {
                     RemotePath = $remotePath
                 }
             )
-            Logs              = @($logResult)
-            Errors            = @()
-            CopiedLogPaths    = @($localPath)
+            Logs              = $logs
+            Errors            = @($logs | Where-Object { -not $_.Copied } | ForEach-Object { $_.Error })
+            CopiedLogPaths    = $copiedLogPaths
             RunDirectory      = $effectiveRunDirectory
             ComputerDirectory = $effectiveComputerDirectory
             LogDirectory      = Join-Path -Path $effectiveComputerDirectory -ChildPath 'Logs'
@@ -600,6 +614,56 @@ Describe 'Invoke-WinPushScript' {
         $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\Install-EA'
         $result.Logs[0].Error | Should Be 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\Install-EA'
         @($result.CopiedLogPaths).Count | Should Be 0
+    }
+
+    It 'keeps failed script result when script and attached log collection both fail' {
+        $fixtureScript = Join-Path -Path $TestDrive -ChildPath 'Fail-EA.ps1'
+        Set-Content -LiteralPath $fixtureScript -Value 'Write-Error "script failed"' -Encoding utf8NoBOM
+        $script:InvokeScriptOutput = @('before error')
+        $script:InvokeScriptErrors = @('script failed')
+        $script:LogCopyError = 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\Fail-EA'
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $fixtureScript -Logs -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'script failed'
+        $result.Output[0] | Should Be 'before error'
+        @($result.Errors).Count | Should Be 1
+        $result.Errors[0] | Should Be 'script failed'
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].Copied | Should Be $false
+        $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\Fail-EA'
+        $result.Logs[0].Error | Should Be 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\Fail-EA'
+        @($result.CopiedLogPaths).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+        ($script:OperationOrder -join ',') | Should Be 'Script:PC-001,Logs:PC-001'
+    }
+
+    It 'keeps script success when one attached log file copy fails' {
+        $fixtureScript = Join-Path -Path $TestDrive -ChildPath 'Install-EA.ps1'
+        Set-Content -LiteralPath $fixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
+        $script:LogCopyReturnedLogs = @(
+            New-WinPushLogResult `
+                -ComputerName 'PC-001' `
+                -RemotePath 'C:\ProgramData\EA\Logs\Install-EA\script.log' `
+                -Copied $false `
+                -ErrorMessage 'Copy failed for script.log'
+        )
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $fixtureScript -Logs -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        [string]::IsNullOrEmpty($result.ErrorMessage) | Should Be $true
+        $result.Output[0] | Should Be 'script output'
+        @($result.Errors).Count | Should Be 0
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].Copied | Should Be $false
+        $result.Logs[0].Error | Should Be 'Copy failed for script.log'
+        @($result.CopiedLogPaths).Count | Should Be 0
+        ($script:OperationOrder -join ',') | Should Be 'Script:PC-001,Logs:PC-001'
     }
 
     It 'shares one log run folder across direct ComputerName script targets' {

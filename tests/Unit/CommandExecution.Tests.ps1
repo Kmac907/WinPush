@@ -63,6 +63,8 @@ Describe 'Invoke-WinPushCommand' {
         $script:CopiedLogRunDirectories = @()
         $script:CopiedLogComputerDirectories = @()
         $script:LogCopyError = $null
+        $script:LogCopyReturnedLogs = $null
+        $script:LogCopyReturnedCopiedLogPaths = $null
     }
 
     Mock New-PSSession {
@@ -175,6 +177,18 @@ Describe 'Invoke-WinPushCommand' {
             -RemotePath $remotePath `
             -LocalPath $localPath `
             -Copied $true
+        $logs = if ($null -ne $script:LogCopyReturnedLogs) {
+            @($script:LogCopyReturnedLogs)
+        }
+        else {
+            @($logResult)
+        }
+        $copiedLogPaths = if ($null -ne $script:LogCopyReturnedCopiedLogPaths) {
+            @($script:LogCopyReturnedCopiedLogPaths)
+        }
+        else {
+            @($logs | Where-Object { $_.Copied } | ForEach-Object { $_.LocalPath })
+        }
 
         [pscustomobject] [ordered] @{
             FileMetadata      = @(
@@ -186,9 +200,9 @@ Describe 'Invoke-WinPushCommand' {
                     LastWriteTimeUtc = [datetime]::UtcNow
                 }
             )
-            Logs              = @($logResult)
-            Errors            = @()
-            CopiedLogPaths    = @($localPath)
+            Logs              = $logs
+            Errors            = @($logs | Where-Object { -not $_.Copied } | ForEach-Object { $_.Error })
+            CopiedLogPaths    = $copiedLogPaths
             RunDirectory      = $effectiveRunDirectory
             ComputerDirectory = $effectiveComputerDirectory
             LogDirectory      = Join-Path -Path $effectiveComputerDirectory -ChildPath 'Logs'
@@ -553,6 +567,52 @@ Describe 'Invoke-WinPushCommand' {
         $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\hostname'
         $result.Logs[0].Error | Should Be 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\hostname'
         @($result.CopiedLogPaths).Count | Should Be 0
+    }
+
+    It 'keeps failed command result when command and attached log collection both fail' {
+        $script:InvokeCommandOutput = @('before error')
+        $script:InvokeCommandErrors = @('command failed')
+        $script:LogCopyError = 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\Write-Error'
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'Write-Error "command failed"' -Logs -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'command failed'
+        $result.Output[0] | Should Be 'before error'
+        @($result.Errors).Count | Should Be 1
+        $result.Errors[0] | Should Be 'command failed'
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].Copied | Should Be $false
+        $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\Write-Error'
+        $result.Logs[0].Error | Should Be 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\Write-Error'
+        @($result.CopiedLogPaths).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+        ($script:OperationOrder -join ',') | Should Be 'Command:PC-001,Logs:PC-001'
+    }
+
+    It 'keeps command success when one attached log file copy fails' {
+        $script:LogCopyReturnedLogs = @(
+            New-WinPushLogResult `
+                -ComputerName 'PC-001' `
+                -RemotePath 'C:\ProgramData\EA\Logs\hostname\command.log' `
+                -Copied $false `
+                -ErrorMessage 'Copy failed for command.log'
+        )
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Logs -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        [string]::IsNullOrEmpty($result.ErrorMessage) | Should Be $true
+        $result.Output[0] | Should Be 'remote output'
+        @($result.Errors).Count | Should Be 0
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].Copied | Should Be $false
+        $result.Logs[0].Error | Should Be 'Copy failed for command.log'
+        @($result.CopiedLogPaths).Count | Should Be 0
+        ($script:OperationOrder -join ',') | Should Be 'Command:PC-001,Logs:PC-001'
     }
 
     It 'shares one log run folder across direct ComputerName command targets' {
