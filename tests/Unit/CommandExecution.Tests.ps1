@@ -1000,13 +1000,62 @@ Describe 'Invoke-WinPushCommand' {
         $result.Operation | Should Be 'RunCommand'
         $result.Succeeded | Should Be $true
         $result.ExitCode | Should Be 0
-        @($result.Output).Count | Should Be 0
+        @($result.Output).Count | Should Be 1
+        $result.Output[0] | Should Be 'winrs output'
         @($result.Errors).Count | Should Be 0
         @($script:NativeProcessFilePaths).Count | Should Be 1
         $script:NativeProcessFilePaths[0] | Should Be 'winrs.exe'
         ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '-r:PC-001|hostname'
         @($script:NewPSSessionComputerNames).Count | Should Be 0
         @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
+    It 'keeps WinRS stdout and stderr in separate arrays when the native process fails' {
+        $script:NativeProcessExitCode = 7
+        $script:NativeProcessStandardOutput = "line one`r`nline two`r`n"
+        $script:NativeProcessStandardError = "`r`nnative error  `r`nmore detail`r`n"
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport WinRM
+
+        $result.Transport | Should Be 'WinRM'
+        $result.Operation | Should Be 'RunCommand'
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 7
+        $result.ErrorMessage | Should Be 'native error'
+        @($result.Output).Count | Should Be 2
+        $result.Output[0] | Should Be 'line one'
+        $result.Output[1] | Should Be 'line two'
+        @($result.Errors).Count | Should Be 3
+        $result.Errors[0] | Should Be ''
+        $result.Errors[1] | Should Be 'native error  '
+        $result.Errors[2] | Should Be 'more detail'
+    }
+
+    It 'uses a deterministic WinRS error message when a nonzero exit has no stderr' {
+        $script:NativeProcessExitCode = 5
+        $script:NativeProcessStandardOutput = 'partial output'
+        $script:NativeProcessStandardError = ''
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport WinRM
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 5
+        $result.ErrorMessage | Should Be 'WinRS command exited with code 5.'
+        @($result.Output).Count | Should Be 1
+        $result.Output[0] | Should Be 'partial output'
+        @($result.Errors).Count | Should Be 0
+    }
+
+    It 'passes spaces, quotes, metacharacters, Unicode, and empty quoted arguments as one WinRS command argument' {
+        $unicodeValue = [string] [char] 0x03A9
+        $command = 'powershell -NoProfile -Command "Write-Output ''hello world''; Write-Output ''' + $unicodeValue + '''; Write-Output ''''; if ($true) { Write-Output ''a&b|c'' }"'
+
+        Invoke-WinPushCommand -ComputerName 'PC-001' -Command $command -Transport WinRM | Out-Null
+
+        @($script:NativeProcessArgumentLists).Count | Should Be 1
+        @($script:NativeProcessArgumentLists[0]).Count | Should Be 2
+        $script:NativeProcessArgumentLists[0][0] | Should Be '-r:PC-001'
+        $script:NativeProcessArgumentLists[0][1] | Should Be $command
     }
 
     It 'rejects WinRM credentials before launching a native process' {

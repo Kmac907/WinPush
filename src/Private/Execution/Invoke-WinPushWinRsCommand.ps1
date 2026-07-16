@@ -15,12 +15,31 @@ function Invoke-WinPushWinRsCommand {
             $Command
         )
 
-    if ($nativeResult.ExitCode -ne 0) {
-        throw [System.InvalidOperationException]::new('WinRS command did not complete successfully.')
-    }
-
     [pscustomobject] [ordered] @{
         PSTypeName = 'WinPush.WinRsCommandResult'
-        ExitCode   = 0
+        ExitCode   = $nativeResult.ExitCode
+        Output     = @(ConvertTo-WinPushWinRsTextArray -Text $nativeResult.StandardOutput)
+        Errors     = @(ConvertTo-WinPushWinRsTextArray -Text $nativeResult.StandardError)
     }
+}
+
+function ConvertTo-WinPushWinRsTextArray {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [string] $Text
+    )
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return @()
+    }
+
+    $normalized = $Text -replace "`r`n", "`n" -replace "`r", "`n"
+    $lines = @($normalized -split "`n")
+
+    if ($lines.Count -gt 0 -and $lines[-1] -eq '') {
+        $lines = @($lines[0..($lines.Count - 2)])
+    }
+
+    return $lines
 }

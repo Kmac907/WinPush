@@ -107,13 +107,31 @@ function Invoke-WinPushCommand {
                 try {
                     $commandResult = Invoke-WinPushWinRsCommand -ComputerName $target -Command $Command
                     $exitCode = $commandResult.ExitCode
+                    $output = @($commandResult.Output)
+                    $errors = @($commandResult.Errors)
+                    $succeeded = $exitCode -eq 0
+                    $errorMessage = if ($succeeded) {
+                        $null
+                    }
+                    else {
+                        $firstError = @($errors | Where-Object { -not [string]::IsNullOrWhiteSpace([string] $_) } | Select-Object -First 1)
+                        if ($firstError.Count -gt 0) {
+                            ([string] $firstError[0]).Trim()
+                        }
+                        else {
+                            'WinRS command exited with code {0}.' -f $exitCode
+                        }
+                    }
 
                     New-WinPushExecutionResult `
                         -ComputerName $target `
                         -Transport 'WinRM' `
                         -Operation 'RunCommand' `
-                        -Succeeded $true `
-                        -ExitCode $exitCode
+                        -Succeeded $succeeded `
+                        -ExitCode $exitCode `
+                        -ErrorMessage $errorMessage `
+                        -Output $output `
+                        -Errors $errors
                 }
                 catch {
                     New-WinPushExecutionResult `
