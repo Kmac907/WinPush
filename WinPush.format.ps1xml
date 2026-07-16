@@ -6,46 +6,29 @@
       <ViewSelectedBy>
         <TypeName>WinPush.ExecutionResult</TypeName>
       </ViewSelectedBy>
-      <TableControl>
-        <TableHeaders>
-          <TableColumnHeader>
-            <Label>ComputerName</Label>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>Operation</Label>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>Succeeded</Label>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>ExitCode</Label>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>ErrorMessage</Label>
-          </TableColumnHeader>
-        </TableHeaders>
-        <TableRowEntries>
-          <TableRowEntry>
-            <TableColumnItems>
-              <TableColumnItem>
+      <ListControl>
+        <ListEntries>
+          <ListEntry>
+            <ListItems>
+              <ListItem>
                 <PropertyName>ComputerName</PropertyName>
-              </TableColumnItem>
-              <TableColumnItem>
+              </ListItem>
+              <ListItem>
                 <PropertyName>Operation</PropertyName>
-              </TableColumnItem>
-              <TableColumnItem>
+              </ListItem>
+              <ListItem>
                 <PropertyName>Succeeded</PropertyName>
-              </TableColumnItem>
-              <TableColumnItem>
+              </ListItem>
+              <ListItem>
                 <PropertyName>ExitCode</PropertyName>
-              </TableColumnItem>
-              <TableColumnItem>
+              </ListItem>
+              <ListItem>
                 <PropertyName>ErrorMessage</PropertyName>
-              </TableColumnItem>
-            </TableColumnItems>
-          </TableRowEntry>
-        </TableRowEntries>
-      </TableControl>
+              </ListItem>
+            </ListItems>
+          </ListEntry>
+        </ListEntries>
+      </ListControl>
     </View>
   </ViewDefinitions>
 </Configuration>

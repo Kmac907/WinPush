@@ -35,7 +35,7 @@ Describe 'WinPush module import foundation' {
         }
     }
 
-    It 'formats execution results as a concise status table without raw output' {
+    It 'formats execution results as a readable status list without raw output' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
 
@@ -70,6 +70,39 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Not Match 'Transport'
         $formatted | Should Not Match 'Output'
         $formatted | Should Not Match 'raw remote output'
+    }
+
+    It 'does not truncate long execution error messages in the default view' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $errorMessage = 'Connecting to remote server JK148H4 failed with the following error message: WinRM cannot complete the operation. Verify that the specified computer name is valid, that the computer is accessible over the network, and that a firewall exception for the WinRM service is enabled.'
+        $result = [pscustomobject] [ordered] @{
+            PSTypeName        = 'WinPush.ExecutionResult'
+            ComputerName      = 'JK148H4'
+            Transport         = 'Psrp'
+            Operation         = 'RunCommand'
+            Succeeded         = $false
+            ExitCode          = 1
+            ErrorMessage      = $errorMessage
+            Output            = @()
+            Errors            = @($errorMessage)
+            Logs              = @()
+            RunDirectory      = $null
+            ComputerDirectory = $null
+            ResultPath        = $null
+            StdOutPath        = $null
+            StdErrPath        = $null
+            CopiedLogPaths    = @()
+        }
+
+        $formatted = $result | Out-String -Width 72
+        $normalized = $formatted -replace '\s+', ' '
+
+        $formatted | Should Match 'ErrorMessage'
+        $normalized | Should Match 'Connecting to remote server JK148H4 failed'
+        $normalized | Should Match 'firewall exception for the WinRM service is enabled'
+        $formatted | Should Not Match ([regex]::Escape([string] [char] 0x2026))
     }
 
     It 'keeps transport implementation out of the root module' {
