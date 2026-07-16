@@ -12,37 +12,71 @@
 
 ## Parameters
 
-| Command | Parameter | Required | Default | Purpose |
-| --- | --- | --- | --- | --- |
-| `Test-WinPushTarget` | `ComputerName` | Yes for direct or pipeline target input | None | Target names supplied directly, by pipeline string, or by pipeline property name. |
-| `Test-WinPushTarget` | `HostFile` | Yes for host-file input | None | UTF-8 file containing target names. |
-| `Test-WinPushTarget` | `Credential` | No | Current identity | Credential used for PSRP session creation. |
-| `Invoke-WinPushCommand` | `ComputerName` | Yes for direct or pipeline target input | None | Target names supplied directly, by pipeline string, or by pipeline property name. |
-| `Invoke-WinPushCommand` | `HostFile` | Yes for host-file input | None | UTF-8 file containing target names. |
-| `Invoke-WinPushCommand` | `Command` | Yes | None | Command text to run remotely. PSRP treats it as PowerShell source; native transports use native command text. |
-| `Invoke-WinPushCommand` | `Transport` | No | `Psrp` | Transport mode: `Psrp`, command-only current-identity `WinRM`/`winrs.exe`, or command-only current-identity `PsExec`/`PsExec.exe`. |
-| `Invoke-WinPushCommand` | `PsExecPath` | No | PATH discovery | Explicit local path to `PsExec.exe`; only valid with `-Transport PsExec`. |
-| `Invoke-WinPushCommand` | `Credential` | No | Current identity | Credential used for PSRP session creation. |
-| `Invoke-WinPushCommand` | `CaptureOutput` | No | `$false` | Writes summary and per-target output artifacts under `OutputRoot`. |
-| `Invoke-WinPushCommand` | `Logs` | No | `$false` | Copies immediate files from the convention-based command log directory. |
-| `Invoke-WinPushCommand` | `OutputRoot` | No | `C:\WinPush` | Local root for generated run artifacts. |
-| `Invoke-WinPushScript` | `ComputerName` | Yes for direct or pipeline target input | None | Target names supplied directly, by pipeline string, or by pipeline property name. |
-| `Invoke-WinPushScript` | `HostFile` | Yes for host-file input | None | UTF-8 file containing target names. |
-| `Invoke-WinPushScript` | `ScriptPath` | Yes | None | Existing local `.ps1` file to run remotely through PSRP. |
-| `Invoke-WinPushScript` | `Credential` | No | Current identity | Credential used for PSRP session creation. |
-| `Invoke-WinPushScript` | `CaptureOutput` | No | `$false` | Writes summary and per-target output artifacts under `OutputRoot`. |
-| `Invoke-WinPushScript` | `Logs` | No | `$false` | Copies immediate files from the convention-based script log directory. |
-| `Invoke-WinPushScript` | `OutputRoot` | No | `C:\WinPush` | Local root for generated run artifacts. |
-| `Copy-WinPushItem` | `ComputerName` | Yes | None | Single target name. |
-| `Copy-WinPushItem` | `Path` | Yes | None | Local source path for upload, or remote source path for download. |
-| `Copy-WinPushItem` | `Destination` | Yes | None | Remote destination for upload, or local destination for download. |
-| `Copy-WinPushItem` | `Direction` | No | `Upload` | Transfer direction: `Upload` or `Download`. |
-| `Copy-WinPushItem` | `Credential` | No | Current identity | Credential used for PSRP session creation. |
-| `Get-WinPushLog` | `ComputerName` | Yes for direct or pipeline target input | None | Target names supplied directly, by pipeline string, or by pipeline property name. |
-| `Get-WinPushLog` | `HostFile` | Yes for host-file input | None | UTF-8 file containing target names. |
-| `Get-WinPushLog` | `RemoteDirectory` | Yes | None | Absolute remote Windows directory containing immediate log files to copy. |
-| `Get-WinPushLog` | `OutputRoot` | No | `C:\WinPush` | Local root for generated run artifacts. |
-| `Get-WinPushLog` | `Credential` | No | Current identity | Credential used for PSRP session creation. |
+This section lists accepted parameters, whether they take an argument, and the valid argument shape. Switch parameters do not take an argument.
+
+### `Test-WinPushTarget`
+
+| Parameter | Argument | Notes |
+| --- | --- | --- |
+| `-ComputerName` | `string[]` | Target names. Also accepts pipeline strings and pipeline objects with a `ComputerName` property. |
+| `-HostFile` | `string` | UTF-8 file containing target names. |
+| `-Credential` | `PSCredential` | Optional PSRP credential. Uses the current identity when omitted. |
+
+Target input is required from either `-ComputerName`, pipeline input, or `-HostFile`.
+
+### `Invoke-WinPushCommand`
+
+| Parameter | Argument | Notes |
+| --- | --- | --- |
+| `-ComputerName` | `string[]` | Target names. Also accepts pipeline strings and pipeline objects with a `ComputerName` property. |
+| `-HostFile` | `string` | UTF-8 file containing target names. |
+| `-Command` | `string` | Command text. Required. PSRP treats this as PowerShell source; native transports use native command text. |
+| `-Transport` | `Psrp`, `WinRM`, `PsExec` | Optional. Defaults to `Psrp`. |
+| `-PsExecPath` | `string` | Optional path to `PsExec.exe`; only valid with `-Transport PsExec`. |
+| `-Credential` | `PSCredential` | Optional PSRP credential. Not supported with `WinRM` or `PsExec`. |
+| `-CaptureOutput` | switch | Writes `summary.csv`, `result.txt`, `stdout.txt`, and `stderr.txt`. Not supported with `WinRM` or `PsExec`. |
+| `-Logs` | switch | Copies convention-based command logs. Not supported with `WinRM` or `PsExec`. |
+| `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
+
+Target input is required from either `-ComputerName`, pipeline input, or `-HostFile`.
+
+### `Invoke-WinPushScript`
+
+| Parameter | Argument | Notes |
+| --- | --- | --- |
+| `-ComputerName` | `string[]` | Target names. Also accepts pipeline strings and pipeline objects with a `ComputerName` property. |
+| `-HostFile` | `string` | UTF-8 file containing target names. |
+| `-ScriptPath` | `string` | Existing local `.ps1` file. Required. |
+| `-Credential` | `PSCredential` | Optional PSRP credential. Uses the current identity when omitted. |
+| `-CaptureOutput` | switch | Writes `summary.csv`, `result.txt`, `stdout.txt`, and `stderr.txt`. |
+| `-Logs` | switch | Copies convention-based script logs. |
+| `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
+
+Target input is required from either `-ComputerName`, pipeline input, or `-HostFile`.
+
+### `Copy-WinPushItem`
+
+| Parameter | Argument | Notes |
+| --- | --- | --- |
+| `-ComputerName` | `string` | Single target name. Required. |
+| `-Path` | `string` | Upload source local file, or download source remote file. Required. |
+| `-Destination` | `string` | Upload destination remote path, or download destination local path. Required. |
+| `-Direction` | `Upload`, `Download` | Optional. Defaults to `Upload`. |
+| `-Credential` | `PSCredential` | Optional PSRP credential. Uses the current identity when omitted. |
+
+`Copy-WinPushItem` supports one target and one file per call.
+
+### `Get-WinPushLog`
+
+| Parameter | Argument | Notes |
+| --- | --- | --- |
+| `-ComputerName` | `string[]` | Target names. Also accepts pipeline strings and pipeline objects with a `ComputerName` property. |
+| `-HostFile` | `string` | UTF-8 file containing target names. |
+| `-RemoteDirectory` | `string` | Absolute remote Windows directory containing immediate log files. Required. |
+| `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
+| `-Credential` | `PSCredential` | Optional PSRP credential. Uses the current identity when omitted. |
+
+Target input is required from either `-ComputerName`, pipeline input, or `-HostFile`.
 
 ## Target Input
 
