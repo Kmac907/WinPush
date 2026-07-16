@@ -1065,7 +1065,7 @@ Describe 'Invoke-WinPushCommand' {
         @($result.Errors).Count | Should Be 0
         @($script:NativeProcessFilePaths).Count | Should Be 1
         $script:NativeProcessFilePaths[0] | Should Be $resolvedPsExecPath
-        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|hostname'
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
         @($script:NewPSSessionComputerNames).Count | Should Be 0
         @($script:RemovedSessionIds).Count | Should Be 0
     }
@@ -1083,7 +1083,7 @@ Describe 'Invoke-WinPushCommand' {
 
             @($script:NativeProcessFilePaths).Count | Should Be 1
             $script:NativeProcessFilePaths[0] | Should Be $discoveredPsExecPath
-            ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|hostname'
+            ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
             @($script:NewPSSessionComputerNames).Count | Should Be 0
         }
         finally {
@@ -1207,6 +1207,84 @@ Describe 'Invoke-WinPushCommand' {
         { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -PsExecPath $psExecPath } |
             Should Throw 'PsExecPath is only supported when Transport is PsExec.'
 
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'keeps PsExec stdout and stderr in separate arrays when the native process fails' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-streams.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $script:NativeProcessExitCode = 23
+        $script:NativeProcessStandardOutput = "line one`r`nline two`r`n"
+        $script:NativeProcessStandardError = "`r`npsexec error  `r`nmore detail`r`n"
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath
+
+        $result.Transport | Should Be 'PsExec'
+        $result.Operation | Should Be 'RunCommand'
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 23
+        $result.ErrorMessage | Should Be 'psexec error'
+        @($result.Output).Count | Should Be 2
+        $result.Output[0] | Should Be 'line one'
+        $result.Output[1] | Should Be 'line two'
+        @($result.Errors).Count | Should Be 3
+        $result.Errors[0] | Should Be ''
+        $result.Errors[1] | Should Be 'psexec error  '
+        $result.Errors[2] | Should Be 'more detail'
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
+    }
+
+    It 'uses a deterministic PsExec error message when a nonzero exit has no stderr' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-nostderr.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $script:NativeProcessExitCode = 5
+        $script:NativeProcessStandardOutput = 'partial output'
+        $script:NativeProcessStandardError = ''
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 5
+        $result.ErrorMessage | Should Be 'PsExec command exited with code 5.'
+        @($result.Output).Count | Should Be 1
+        $result.Output[0] | Should Be 'partial output'
+        @($result.Errors).Count | Should Be 0
+    }
+
+    It 'passes spaces, quotes, metacharacters, Unicode, and empty quoted arguments as one PsExec command text argument' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-quoting.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $unicodeValue = [string] [char] 0x03A9
+        $command = 'powershell -NoProfile -Command "Write-Output ''hello world''; Write-Output ''' + $unicodeValue + '''; Write-Output ''''; if ($true) { Write-Output ''a&b|c'' }"'
+
+        Invoke-WinPushCommand -ComputerName 'PC-001' -Command $command -Transport PsExec -PsExecPath $psExecPath | Out-Null
+
+        @($script:NativeProcessArgumentLists).Count | Should Be 1
+        @($script:NativeProcessArgumentLists[0]).Count | Should Be 6
+        $script:NativeProcessArgumentLists[0][0] | Should Be '\\PC-001'
+        $script:NativeProcessArgumentLists[0][1] | Should Be 'cmd.exe'
+        $script:NativeProcessArgumentLists[0][2] | Should Be '/d'
+        $script:NativeProcessArgumentLists[0][3] | Should Be '/s'
+        $script:NativeProcessArgumentLists[0][4] | Should Be '/c'
+        $script:NativeProcessArgumentLists[0][5] | Should Be $command
+    }
+
+    It 'rejects PsExec credentials without emitting credential values' {
+        $secret = 'Distinctive-10.2-Credential-Secret!'
+        $credential = New-TestCredential -Secret $secret
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-redaction.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+
+        $diagnosticText = try {
+            Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath -Credential $credential
+        }
+        catch {
+            $_.Exception.Message
+        }
+
+        $diagnosticText | Should Be 'Credential is not supported when Transport is PsExec.'
+        $diagnosticText | Should Not Match ([regex]::Escape($secret))
         @($script:NativeProcessFilePaths).Count | Should Be 0
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
