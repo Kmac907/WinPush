@@ -75,6 +75,10 @@ Describe 'Invoke-WinPushCommand' {
         $script:NativeProcessExitCode = 0
         $script:NativeProcessStandardOutput = "winrs output`r`n"
         $script:NativeProcessStandardError = ''
+        $script:NativeProcessErrorsByComputerName = @{}
+        $script:NativeProcessExitCodesByComputerName = @{}
+        $script:NativeProcessStandardOutputsByComputerName = @{}
+        $script:NativeProcessStandardErrorsByComputerName = @{}
     }
 
     Mock New-PSSession {
@@ -227,18 +231,43 @@ Describe 'Invoke-WinPushCommand' {
 
         $script:NativeProcessFilePaths += $FilePath
         $script:NativeProcessArgumentLists += , @($ArgumentList)
+        $computerName = if ($ArgumentList.Count -gt 0 -and $ArgumentList[0] -like '-r:*') {
+            $ArgumentList[0].Substring(3)
+        }
+        else {
+            ''
+        }
 
         if ($null -ne $script:NativeProcessError) {
             throw $script:NativeProcessError
+        }
+
+        if ($script:NativeProcessErrorsByComputerName.ContainsKey($computerName)) {
+            throw $script:NativeProcessErrorsByComputerName[$computerName]
+        }
+
+        $exitCode = $script:NativeProcessExitCode
+        if ($script:NativeProcessExitCodesByComputerName.ContainsKey($computerName)) {
+            $exitCode = $script:NativeProcessExitCodesByComputerName[$computerName]
+        }
+
+        $standardOutput = $script:NativeProcessStandardOutput
+        if ($script:NativeProcessStandardOutputsByComputerName.ContainsKey($computerName)) {
+            $standardOutput = $script:NativeProcessStandardOutputsByComputerName[$computerName]
+        }
+
+        $standardError = $script:NativeProcessStandardError
+        if ($script:NativeProcessStandardErrorsByComputerName.ContainsKey($computerName)) {
+            $standardError = $script:NativeProcessStandardErrorsByComputerName[$computerName]
         }
 
         [pscustomobject] [ordered] @{
             PSTypeName      = 'WinPush.NativeProcessResult'
             FilePath        = $FilePath
             ArgumentList    = @($ArgumentList)
-            ExitCode        = $script:NativeProcessExitCode
-            StandardOutput  = $script:NativeProcessStandardOutput
-            StandardError   = $script:NativeProcessStandardError
+            ExitCode        = $exitCode
+            StandardOutput  = $standardOutput
+            StandardError   = $standardError
         }
     }
 
@@ -1068,29 +1097,89 @@ Describe 'Invoke-WinPushCommand' {
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
-    It 'rejects WinRM host-file targets before launching a native process' {
+    It 'runs WinRS direct-array targets sequentially through independent native processes' {
+        $script:NativeProcessExitCodesByComputerName = @{
+            'PC-002' = 9
+        }
+        $script:NativeProcessStandardOutputsByComputerName = @{
+            'PC-001' = "first target`r`n"
+            'PC-002' = "second target`r`n"
+        }
+        $script:NativeProcessStandardErrorsByComputerName = @{
+            'PC-002' = "target two failed`r`n"
+        }
+
+        $results = @(Invoke-WinPushCommand -ComputerName @('PC-001', 'PC-002', 'pc-001') -Command 'hostname' -Transport WinRM)
+
+        @($results).Count | Should Be 2
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[0].Succeeded | Should Be $true
+        $results[0].ExitCode | Should Be 0
+        $results[0].Output[0] | Should Be 'first target'
+        $results[1].ComputerName | Should Be 'PC-002'
+        $results[1].Succeeded | Should Be $false
+        $results[1].ExitCode | Should Be 9
+        $results[1].Output[0] | Should Be 'second target'
+        $results[1].Errors[0] | Should Be 'target two failed'
+        $results[1].ErrorMessage | Should Be 'target two failed'
+        @($script:NativeProcessFilePaths).Count | Should Be 2
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '-r:PC-001|hostname'
+        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be '-r:PC-002|hostname'
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
+    It 'continues WinRS pipeline targets after one native process launch failure' {
+        $script:NativeProcessErrorsByComputerName = @{
+            'PC-001' = 'launch failed'
+        }
+        $script:NativeProcessStandardOutputsByComputerName = @{
+            'PC-002' = "later target`r`n"
+        }
+
+        $results = @(
+            @(
+                [pscustomobject] @{ ComputerName = 'PC-001' }
+                [pscustomobject] @{ ComputerName = 'PC-002' }
+            ) | Invoke-WinPushCommand -Command 'hostname' -Transport WinRM
+        )
+
+        @($results).Count | Should Be 2
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[0].Succeeded | Should Be $false
+        $results[0].ExitCode | Should Be 1
+        $results[0].ErrorMessage | Should Be 'launch failed'
+        $results[1].ComputerName | Should Be 'PC-002'
+        $results[1].Succeeded | Should Be $true
+        $results[1].Output[0] | Should Be 'later target'
+        @($script:NativeProcessFilePaths).Count | Should Be 2
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '-r:PC-001|hostname'
+        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be '-r:PC-002|hostname'
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'runs WinRS host-file targets through the shared resolver in order' {
         $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'valid-hosts.txt'
+        $utf8Target = 'pc-utf8-{0}01' -f [char] 0x00e9
+        $script:NativeProcessStandardOutputsByComputerName = @{
+            'PC-001'     = "first target`r`n"
+            $utf8Target  = "utf8 target`r`n"
+            'PC-003'     = "third target`r`n"
+        }
 
-        { Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname' -Transport WinRM } |
-            Should Throw 'HostFile targets are not supported when Transport is WinRM.'
+        $results = @(Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname' -Transport WinRM)
 
-        @($script:NativeProcessFilePaths).Count | Should Be 0
-        @($script:NewPSSessionComputerNames).Count | Should Be 0
-    }
-
-    It 'rejects multiple WinRM targets before launching a native process' {
-        { Invoke-WinPushCommand -ComputerName @('PC-001', 'PC-002') -Command 'hostname' -Transport WinRM } |
-            Should Throw 'Transport WinRM supports exactly one target.'
-
-        @($script:NativeProcessFilePaths).Count | Should Be 0
-        @($script:NewPSSessionComputerNames).Count | Should Be 0
-    }
-
-    It 'rejects WinRM pipeline targets before launching a native process' {
-        { @('PC-001') | Invoke-WinPushCommand -Command 'hostname' -Transport WinRM } |
-            Should Throw 'Pipeline targets are not supported when Transport is WinRM.'
-
-        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($results).Count | Should Be 3
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[1].ComputerName | Should Be $utf8Target
+        $results[2].ComputerName | Should Be 'PC-003'
+        $results[0].Output[0] | Should Be 'first target'
+        $results[1].Output[0] | Should Be 'utf8 target'
+        $results[2].Output[0] | Should Be 'third target'
+        @($script:NativeProcessFilePaths).Count | Should Be 3
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '-r:PC-001|hostname'
+        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be ('-r:{0}|hostname' -f $utf8Target)
+        ($script:NativeProcessArgumentLists[2] -join '|') | Should Be '-r:PC-003|hostname'
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 

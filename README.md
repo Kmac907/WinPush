@@ -81,7 +81,7 @@ Generated build and validation output is written under `artifacts/`, which is ig
 | --- | --- |
 | `Copy-WinPushItem` | Uploads one existing local file to one resolved `-ComputerName` target through a temporary PSRP session using `Copy-Item -ToSession`, or downloads one remote file through `Copy-Item -FromSession` when `-Direction Download` is supplied. Upload remains the default direction. For uploads, `-Path` is validated as a non-empty existing local file before any session is opened; directories, missing files, and wildcard-expanded paths are not accepted. For downloads, `-Path` is treated as non-empty remote source text and `-Destination` must be a valid local file, local directory, or missing leaf whose parent directory already exists. `-Destination` is validated as non-empty and then passed to the copy operation unchanged. The command does not support pipeline input, `-HostFile`, arrays, recursion, artifact writing, logs, automatic directory creation, or multi-target transfer. Success returns one `WinPush.ExecutionResult` with `Transport = Psrp`, `Operation = CopyFile`, `ExitCode = 0`, and transfer metadata in `Output`. |
 | `Get-WinPushLog` | Validates one explicit absolute Windows `-RemoteDirectory` path for direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets, opens one temporary PSRP session per resolved target, verifies the remote path is an existing directory, enumerates immediate regular files only, and copies each immediate file to that target's local `Logs` folder under `C:\WinPush` by default or the caller-supplied `-OutputRoot`. Multi-target runs execute sequentially, return one `WinPush.ExecutionResult` per target in resolved order, continue after one target fails, and share one timestamped run folder for copied log artifacts with one child folder per `ComputerName`. Success returns `Transport = Psrp`, `Operation = GetLogs`, `ExitCode = 0`, file metadata in `Output`, one `WinPush.LogResult` per attempted file in `Logs`, and successful local file paths in `CopiedLogPaths`. Empty valid directories are successful zero-file outcomes. Missing, inaccessible, or non-directory remote paths return a failed result for that target. If one file copy fails, later files are still attempted, successful copies remain in `Logs` and `CopiedLogPaths`, the failed file has a `WinPush.LogResult` with `Copied = False`, and that target's outer result has `Succeeded = False`. This command does not read copied file contents into memory, traverse nested directories, create remote directories, write `summary.csv` or `result.txt`, or recurse. |
-| `Invoke-WinPushCommand` | Runs non-empty PowerShell command text on direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP sequentially by default using the current Windows identity or an optional `-Credential`, and returns one `WinPush.ExecutionResult` summary per resolved target. Explicit command-shell invocations such as `cmd.exe /d /s /c "echo winpush"` are accepted as caller-supplied PowerShell command text; WinPush does not add automatic `cmd.exe` wrapping. Command output and command errors are preserved together; command errors set `Succeeded = $false` and `ExitCode = 1`. `-CaptureOutput` writes `summary.csv`, per-target `result.txt`, `stdout.txt`, and `stderr.txt` under one shared timestamped `-OutputRoot` run folder with one child folder per target. `-Logs` copies immediate regular files from the convention-based remote source `C:\ProgramData\EA\Logs\<command-name>\`, where `<command-name>` is derived from the first command name in the supplied PowerShell source, sanitized for a directory name, and falls back to `Command` when no command name can be derived. Attached command logs reuse the command PSSession, run after the command attempt, write under the target `Logs` folder, populate `Logs` and `CopiedLogPaths`, and do not change the primary command output, errors, or success state. `-Transport WinRM` runs one current-identity command on one direct `-ComputerName` target through `winrs.exe` using the native process boundary, keeps native standard output text in `Output`, keeps native standard error text in `Errors`, and sets `ExitCode` to the native process exit code; nonzero WinRS exits return failed results without discarding stdout. `-Credential`, pipeline targets, `-HostFile`, multiple targets, `-CaptureOutput`, and `-Logs` are rejected for WinRM before launching a process. |
+| `Invoke-WinPushCommand` | Runs non-empty PowerShell command text on direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP sequentially by default using the current Windows identity or an optional `-Credential`, and returns one `WinPush.ExecutionResult` summary per resolved target. Explicit command-shell invocations such as `cmd.exe /d /s /c "echo winpush"` are accepted as caller-supplied PowerShell command text; WinPush does not add automatic `cmd.exe` wrapping. Command output and command errors are preserved together; command errors set `Succeeded = $false` and `ExitCode = 1`. `-CaptureOutput` writes `summary.csv`, per-target `result.txt`, `stdout.txt`, and `stderr.txt` under one shared timestamped `-OutputRoot` run folder with one child folder per target. `-Logs` copies immediate regular files from the convention-based remote source `C:\ProgramData\EA\Logs\<command-name>\`, where `<command-name>` is derived from the first command name in the supplied PowerShell source, sanitized for a directory name, and falls back to `Command` when no command name can be derived. Attached command logs reuse the command PSSession, run after the command attempt, write under the target `Logs` folder, populate `Logs` and `CopiedLogPaths`, and do not change the primary command output, errors, or success state. `-Transport WinRM` runs current-identity commands through `winrs.exe` for direct `-ComputerName`, pipeline, or `-HostFile` targets using the shared target resolver, sequential execution, and one independent native process per resolved target. WinRM keeps native standard output text in `Output`, keeps native standard error text in `Errors`, and sets `ExitCode` to the native process exit code; nonzero WinRS exits return failed results without discarding stdout, and one target failure does not stop later targets. `-Credential`, `-CaptureOutput`, and `-Logs` are rejected for WinRM before launching a process. |
 | `Invoke-WinPushScript` | Runs one existing local `.ps1` file on direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP using `Invoke-Command -FilePath` and the current Windows identity or an optional `-Credential`. Direct arrays, pipeline targets, and host-file targets are resolved through the standard target resolver, execute sequentially, return one `WinPush.ExecutionResult` per resolved target in order, and continue after one target fails. Invalid, missing, directory, and non-`.ps1` script paths fail before a session is opened; invalid or missing host files also fail before a session is opened. Success returns `Transport = Psrp`, `Operation = RunScript`, and `ExitCode = 0`; script errors return `Succeeded = $false`, `ExitCode = 1`, and retain script output in `Output` while script errors are kept in `Errors`. Raw script output and errors are returned inside the result object rather than emitted as separate terminal output. `-CaptureOutput` writes retained output to `stdout.txt`, script errors to `stderr.txt`, plus `summary.csv` and per-target `result.txt`; multi-target direct, pipeline, and host-file runs share one timestamped run folder with one child folder per `ComputerName`. `-Logs` copies immediate regular files from the convention-based remote source `C:\ProgramData\EA\Logs\<script-name>\`, where `<script-name>` is the local script file base name such as `Install-EA` for `Install-EA.ps1`. Attached script logs reuse the script PSSession, run after the script attempt, write under the target `Logs` folder, populate `Logs` and `CopiedLogPaths`, and do not change the primary script output, errors, or success state. Script arguments are not implemented. |
 | `Test-WinPushTarget` | Tests PSRP session creation for direct `-ComputerName`, pipeline, or `-HostFile` targets sequentially using the current Windows identity or an optional `-Credential` and returns one `WinPush.ExecutionResult` per resolved target. |
 
@@ -159,12 +159,12 @@ Planned defaults:
 
 Published modules are installed from the private `SCFModules` Azure Artifacts NuGet feed.
 
-Register the repository once per machine or user profile:
+Register the repository once per machine from an elevated PowerShell 7 session:
 
 ```powershell
 $FeedUri = 'https://pkgs.dev.azure.com/scfitops/_packaging/SCFModules/nuget/v3/index.json'
 
-Install-Module Microsoft.PowerShell.PSResourceGet -Scope CurrentUser -Force -AllowClobber
+Install-Module Microsoft.PowerShell.PSResourceGet -Scope AllUsers -Force -AllowClobber
 
 Register-PSResourceRepository `
     -Name SCFModules `
@@ -196,21 +196,15 @@ Install-PSResource `
     -Credential $Credential
 ```
 
-Use `-Scope CurrentUser` instead of `-Scope AllUsers` when installing without administrative rights.
+WinPush is installed with `-Scope AllUsers` only. Run installation and updates from an elevated PowerShell 7 session.
 
-Verify installation with the same scope used during install:
+Verify the AllUsers installation:
 
 ```powershell
 Get-Module -ListAvailable WinPush |
     Select-Object Name, Version, ModuleBase
 
 Get-InstalledPSResource -Name WinPush -Scope AllUsers
-```
-
-For a current-user install, use:
-
-```powershell
-Get-InstalledPSResource -Name WinPush -Scope CurrentUser
 ```
 
 Import the module and verify its exported commands:
@@ -308,6 +302,25 @@ Command execution through WinRS with the current Windows identity:
 ```powershell
 Invoke-WinPushCommand `
   -ComputerName $ComputerName `
+  -Command 'hostname' `
+  -Transport WinRM
+```
+
+Command execution through WinRS across resolved targets:
+
+```powershell
+Invoke-WinPushCommand `
+  -ComputerName @('PC01', 'PC02') `
+  -Command 'hostname' `
+  -Transport WinRM
+
+Get-Content .\hosts.txt |
+  Invoke-WinPushCommand `
+    -Command 'hostname' `
+    -Transport WinRM
+
+Invoke-WinPushCommand `
+  -HostFile .\hosts.txt `
   -Command 'hostname' `
   -Transport WinRM
 ```
@@ -421,7 +434,7 @@ This module should be run only by operators or automation identities that have p
 | `Invoke-WinPushCommand` | `ComputerName` | Yes for direct or pipeline target input | None | Target names supplied directly, by pipeline string, or by pipeline property name. |
 | `Invoke-WinPushCommand` | `HostFile` | Yes for host-file input | None | UTF-8 file containing target names. |
 | `Invoke-WinPushCommand` | `Command` | Yes | None | PowerShell command text to run remotely. |
-| `Invoke-WinPushCommand` | `Transport` | No | `Psrp` | Transport mode: `Psrp` or limited `WinRM`/`winrs.exe`. |
+| `Invoke-WinPushCommand` | `Transport` | No | `Psrp` | Transport mode: `Psrp` or command-only current-identity `WinRM`/`winrs.exe`. |
 | `Invoke-WinPushCommand` | `Credential` | No | Current identity | Credential used for PSRP session creation. |
 | `Invoke-WinPushCommand` | `CaptureOutput` | No | `$false` | Writes summary and per-target output artifacts under `OutputRoot`. |
 | `Invoke-WinPushCommand` | `Logs` | No | `$false` | Copies immediate files from the convention-based command log directory. |
@@ -561,14 +574,6 @@ To remove a PSResourceGet installation:
 
 ```powershell
 Uninstall-PSResource -Name WinPush -Scope AllUsers
-```
-
-Use `-Scope CurrentUser` when the module was installed to the current-user scope.
-
-To remove a repository-installed current-user module:
-
-```powershell
-Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\Modules\WinPush') -Recurse -Force
 ```
 
 For Windows PowerShell 5.1, also check:
