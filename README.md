@@ -58,6 +58,7 @@ Out of scope:
 ```text
 WinPush/
 ├─ README.md
+├─ WinPush.format.ps1xml
 ├─ src/
 │  ├─ Public/
 │  └─ Private/
@@ -159,6 +160,8 @@ Planned defaults:
 
 Published modules are installed from the private `SCFModules` Azure Artifacts NuGet feed.
 
+Published package versions are immutable. If any shipped file changes, including manifest-declared format files such as `WinPush.format.ps1xml`, the `ModuleVersion` in `WinPush.psd1` must be increased before publishing. Installing with `-Reinstall` refreshes the same published version only; it does not make Azure Artifacts replace an existing package version with new contents.
+
 Register the repository once per machine from an elevated PowerShell 7 session:
 
 ```powershell
@@ -180,6 +183,7 @@ Install the module:
 Install-PSResource `
     -Name WinPush `
     -Repository SCFModules `
+    -Version 0.1.1 `
     -Scope AllUsers
 ```
 
@@ -192,6 +196,7 @@ $Credential = [pscredential]::new('AzureDevOps', $Pat)
 Install-PSResource `
     -Name WinPush `
     -Repository SCFModules `
+    -Version 0.1.1 `
     -Scope AllUsers `
     -Credential $Credential
 ```
@@ -205,6 +210,19 @@ Get-Module -ListAvailable WinPush |
     Select-Object Name, Version, ModuleBase
 
 Get-InstalledPSResource -Name WinPush -Scope AllUsers
+```
+
+Verify the installed package includes manifest-declared format files:
+
+```powershell
+$Module = Get-Module -ListAvailable WinPush |
+    Sort-Object Version -Descending |
+    Select-Object -First 1
+
+Import-PowerShellDataFile (Join-Path $Module.ModuleBase 'WinPush.psd1') |
+    Select-Object -ExpandProperty FormatsToProcess
+
+Test-Path (Join-Path $Module.ModuleBase 'WinPush.format.ps1xml')
 ```
 
 Import the module and verify its exported commands:
@@ -253,10 +271,11 @@ Test-WinPushTarget
 The module manifest includes package metadata required by PSResourceGet packaging:
 
 - `Description`
+- `FormatsToProcess`
 - `PrivateData.PSData.Tags`
 - `PrivateData.PSData.ProjectUri`
 
-`ProjectUri` must not be empty. Empty package metadata can cause `Compress-PSResource` to fail during CI packaging.
+`ProjectUri` must not be empty. Empty package metadata can cause `Compress-PSResource` to fail during CI packaging. Files declared by manifest paths must be included in the staged package root before `Compress-PSResource` runs.
 
 ---
 
@@ -610,7 +629,7 @@ The module foundation, result contracts, target resolution, connectivity checks 
 
 ## Version
 
-Current version: `0.1.0`
+Current version: `0.1.1`
 
 Version source: `WinPush.psd1`
 

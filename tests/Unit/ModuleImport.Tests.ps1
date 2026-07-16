@@ -13,6 +13,7 @@ Describe 'WinPush module import foundation' {
     It 'declares the approved PowerShell runtime and edition' {
         $manifest = Import-PowerShellDataFile -LiteralPath $script:ManifestPath
 
+        $manifest.ModuleVersion | Should Be '0.1.1'
         $manifest.PowerShellVersion | Should Be '7.6'
         ($manifest.CompatiblePSEditions -join ',') | Should Be 'Core'
     }
@@ -22,6 +23,16 @@ Describe 'WinPush module import foundation' {
 
         ($manifest.FormatsToProcess -join ',') | Should Be 'WinPush.format.ps1xml'
         Test-Path -LiteralPath (Join-Path -Path $script:ModuleRoot -ChildPath 'WinPush.format.ps1xml') | Should Be $true
+    }
+
+    It 'keeps every manifest-declared format file in the package root' {
+        $manifest = Import-PowerShellDataFile -LiteralPath $script:ManifestPath
+
+        foreach ($fileName in @($manifest.FormatsToProcess)) {
+            $filePath = Join-Path -Path $script:ModuleRoot -ChildPath $fileName
+
+            Test-Path -LiteralPath $filePath -PathType Leaf | Should Be $true
+        }
     }
 
     It 'formats execution results as a concise status table without raw output' {
