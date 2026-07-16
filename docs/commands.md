@@ -6,7 +6,7 @@
 | --- | --- |
 | `Test-WinPushTarget` | Tests PSRP session creation for direct `-ComputerName`, pipeline, or `-HostFile` targets sequentially using the current Windows identity or an optional `-Credential`. Returns one `WinPush.ExecutionResult` per resolved target. |
 | `Invoke-WinPushCommand` | Runs non-empty command text on direct `-ComputerName`, pipeline, pipeline-by-property-name `ComputerName`, or `-HostFile` targets. PSRP is the default transport. `-Transport WinRM` runs current-identity commands through `winrs.exe`. `-Transport PsExec` runs current-identity commands through operator-supplied `PsExec.exe`. |
-| `Invoke-WinPushScript` | Runs one existing local `.ps1` file on direct `-ComputerName`, pipeline, pipeline-by-property-name `ComputerName`, or `-HostFile` targets. PSRP uses `Invoke-Command -FilePath`. WinRM and PsExec execute encoded local script content through remote Windows PowerShell. |
+| `Invoke-WinPushScript` | Runs one existing local `.ps1` file on direct `-ComputerName`, pipeline, pipeline-by-property-name `ComputerName`, or `-HostFile` targets. PSRP uses `Invoke-Command -FilePath`. WinRM and PsExec stage the script through the selected native transport and execute the staged file through remote Windows PowerShell. |
 | `Copy-WinPushItem` | Uploads one existing local file to one target through `Copy-Item -ToSession`, or downloads one remote file through `Copy-Item -FromSession` when `-Direction Download` is supplied. |
 | `Get-WinPushLog` | Copies immediate regular files from one explicit absolute remote Windows directory to the target's local `Logs` folder under a timestamped output run folder. |
 
@@ -52,6 +52,7 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 | `-Credential` | `PSCredential` | Optional PSRP credential. Not supported with `WinRM` or `PsExec`. |
 | `-CaptureOutput` | switch | Writes `summary.csv`, `result.txt`, `stdout.txt`, and `stderr.txt`. Supported with every transport. |
 | `-Logs` | switch | Copies convention-based script logs. Not supported with `WinRM` or `PsExec`. |
+| `-KeepStagedScript` | switch | Leaves the staged native-transport script folder on the target for troubleshooting. Native script staging is removed by default. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
 
 Target input is required from either `-ComputerName`, pipeline input, or `-HostFile`.
@@ -99,9 +100,9 @@ PSRP command text is PowerShell source. Explicit command-shell invocations such 
 
 WinRM transport launches `winrs.exe` once per resolved target. It keeps native standard output text in `Output`, native standard error text in `Errors`, and sets `ExitCode` to the native process exit code.
 
-PsExec transport launches operator-supplied or PATH-discovered `PsExec.exe` once per resolved target. PsExec executes the supplied command text through remote `cmd.exe /d /s /c`. WinPush does not download, bundle, license, or redistribute PsExec.
+PsExec transport launches operator-supplied or PATH-discovered `PsExec.exe` once per resolved target. WinPush passes `-h` so PsExec requests the elevated remote token when available, then executes the supplied command text through remote `cmd.exe /d /s /c`. WinPush does not download, bundle, license, or redistribute PsExec.
 
-Native script transports encode the local `.ps1` file content and execute it through remote `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand`. This runs the script content without staging the script file on the target.
+Native script transports copy the local `.ps1` file to `C:\Windows\Temp\WinPush\<stage-id>\` through small native PowerShell staging commands, then invoke the staged script path through remote Windows PowerShell. The staged folder is removed after execution unless `-KeepStagedScript` is supplied.
 
 `-Credential` and `-Logs` are rejected for WinRM and PsExec before launching a process. `-CaptureOutput` is supported for command and script execution on every transport.
 
@@ -150,5 +151,5 @@ Command and script behavior is determined by caller-supplied command text or scr
 - Automatic WinRM, firewall, TrustedHosts, certificate, endpoint, or policy configuration is not implemented.
 - Recursive file transfer, recursive log enumeration, and multi-target file transfer are not implemented.
 - Script arguments are not implemented for `Invoke-WinPushScript`.
-- Native script transports execute encoded script content and do not support `-Credential` or `-Logs`.
+- Native script transports stage script content through the selected native transport and do not support `-Credential` or `-Logs`.
 - `Copy-WinPushItem` supports one target and one file per call.

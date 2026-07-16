@@ -120,6 +120,16 @@ Invoke-WinPushScript `
     -Transport WinRM
 ```
 
+Run a local script through WinRS and leave the staged file for troubleshooting:
+
+```powershell
+Invoke-WinPushScript `
+    -ComputerName $ComputerName `
+    -ScriptPath $ScriptPath `
+    -Transport WinRM `
+    -KeepStagedScript
+```
+
 Run a local script through PsExec:
 
 ```powershell

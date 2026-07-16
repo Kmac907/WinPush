@@ -1065,7 +1065,7 @@ Describe 'Invoke-WinPushCommand' {
         @($result.Errors).Count | Should Be 0
         @($script:NativeProcessFilePaths).Count | Should Be 1
         $script:NativeProcessFilePaths[0] | Should Be $resolvedPsExecPath
-        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|-h|cmd.exe|/d|/s|/c|hostname'
         @($script:NewPSSessionComputerNames).Count | Should Be 0
         @($script:RemovedSessionIds).Count | Should Be 0
     }
@@ -1083,7 +1083,7 @@ Describe 'Invoke-WinPushCommand' {
 
             @($script:NativeProcessFilePaths).Count | Should Be 1
             $script:NativeProcessFilePaths[0] | Should Be $discoveredPsExecPath
-            ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
+            ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|-h|cmd.exe|/d|/s|/c|hostname'
             @($script:NewPSSessionComputerNames).Count | Should Be 0
         }
         finally {
@@ -1220,9 +1220,9 @@ Describe 'Invoke-WinPushCommand' {
         Split-Path -Path $script:NativeProcessFilePaths[0] -Leaf | Should Be 'PsExec-multiple.exe'
         Split-Path -Path $script:NativeProcessFilePaths[1] -Leaf | Should Be 'PsExec-multiple.exe'
         Split-Path -Path $script:NativeProcessFilePaths[2] -Leaf | Should Be 'PsExec-multiple.exe'
-        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
-        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be '\\PC-002|cmd.exe|/d|/s|/c|hostname'
-        ($script:NativeProcessArgumentLists[2] -join '|') | Should Be '\\PC-003|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|-h|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be '\\PC-002|-h|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[2] -join '|') | Should Be '\\PC-003|-h|cmd.exe|/d|/s|/c|hostname'
         @($script:NewPSSessionComputerNames).Count | Should Be 0
         @($script:RemovedSessionIds).Count | Should Be 0
     }
@@ -1255,8 +1255,8 @@ Describe 'Invoke-WinPushCommand' {
         $results[1].Succeeded | Should Be $true
         $results[1].Output[0] | Should Be 'later target'
         @($script:NativeProcessFilePaths).Count | Should Be 2
-        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
-        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be '\\PC-002|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|-h|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be '\\PC-002|-h|cmd.exe|/d|/s|/c|hostname'
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
@@ -1284,9 +1284,9 @@ Describe 'Invoke-WinPushCommand' {
         $results[1].Output[0] | Should Be 'utf8 target'
         $results[2].Output[0] | Should Be 'third target'
         @($script:NativeProcessFilePaths).Count | Should Be 3
-        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
-        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be ('\\{0}|cmd.exe|/d|/s|/c|hostname' -f $utf8Target)
-        ($script:NativeProcessArgumentLists[2] -join '|') | Should Be '\\PC-003|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|-h|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be ('\\{0}|-h|cmd.exe|/d|/s|/c|hostname' -f $utf8Target)
+        ($script:NativeProcessArgumentLists[2] -join '|') | Should Be '\\PC-003|-h|cmd.exe|/d|/s|/c|hostname'
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
@@ -1322,7 +1322,7 @@ Describe 'Invoke-WinPushCommand' {
         $result.Errors[0] | Should Be ''
         $result.Errors[1] | Should Be 'psexec error  '
         $result.Errors[2] | Should Be 'more detail'
-        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|-h|cmd.exe|/d|/s|/c|hostname'
     }
 
     It 'uses a deterministic PsExec error message when a nonzero exit has no stderr' {
@@ -1351,13 +1351,14 @@ Describe 'Invoke-WinPushCommand' {
         Invoke-WinPushCommand -ComputerName 'PC-001' -Command $command -Transport PsExec -PsExecPath $psExecPath | Out-Null
 
         @($script:NativeProcessArgumentLists).Count | Should Be 1
-        @($script:NativeProcessArgumentLists[0]).Count | Should Be 6
+        @($script:NativeProcessArgumentLists[0]).Count | Should Be 7
         $script:NativeProcessArgumentLists[0][0] | Should Be '\\PC-001'
-        $script:NativeProcessArgumentLists[0][1] | Should Be 'cmd.exe'
-        $script:NativeProcessArgumentLists[0][2] | Should Be '/d'
-        $script:NativeProcessArgumentLists[0][3] | Should Be '/s'
-        $script:NativeProcessArgumentLists[0][4] | Should Be '/c'
-        $script:NativeProcessArgumentLists[0][5] | Should Be $command
+        $script:NativeProcessArgumentLists[0][1] | Should Be '-h'
+        $script:NativeProcessArgumentLists[0][2] | Should Be 'cmd.exe'
+        $script:NativeProcessArgumentLists[0][3] | Should Be '/d'
+        $script:NativeProcessArgumentLists[0][4] | Should Be '/s'
+        $script:NativeProcessArgumentLists[0][5] | Should Be '/c'
+        $script:NativeProcessArgumentLists[0][6] | Should Be $command
     }
 
     It 'rejects PsExec credentials without emitting credential values' {

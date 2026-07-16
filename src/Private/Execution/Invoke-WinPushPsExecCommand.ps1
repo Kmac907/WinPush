@@ -17,6 +17,7 @@ function Invoke-WinPushPsExecCommand {
         -FilePath $resolvedPsExecPath `
         -ArgumentList @(
             ('\\{0}' -f $ComputerName)
+            '-h'
             'cmd.exe'
             '/d'
             '/s'

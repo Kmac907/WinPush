@@ -4,7 +4,7 @@ $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\P
 $script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushLogResult.ps1'
 $script:ArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
 $script:NativeProcessPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushNativeProcess.ps1'
-$script:NativeScriptCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\New-WinPushNativeScriptCommand.ps1'
+$script:NativeScriptStagePath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\New-WinPushNativeScriptStagePlan.ps1'
 $script:WinRsCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushWinRsCommand.ps1'
 $script:PsExecCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushPsExecCommand.ps1'
 $script:PsrpScriptPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushPsrpScript.ps1'
@@ -18,7 +18,7 @@ $script:ScriptCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\P
 . $script:LogResultFactoryPath
 . $script:ArtifactPath
 . $script:NativeProcessPath
-. $script:NativeScriptCommandPath
+. $script:NativeScriptStagePath
 . $script:WinRsCommandPath
 . $script:PsExecCommandPath
 . $script:PsrpScriptPath
@@ -43,6 +43,16 @@ function New-TestCredential {
         'CONTOSO\operator',
         $secureSecret
     )
+}
+
+function ConvertFrom-TestEncodedCommand {
+    param(
+        [Parameter(Mandatory)]
+        [string] $Command
+    )
+
+    $encodedCommand = $Command -replace '^.*\s-EncodedCommand\s+', ''
+    [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String($encodedCommand))
 }
 
 Describe 'Invoke-WinPushScript' {
@@ -82,6 +92,11 @@ Describe 'Invoke-WinPushScript' {
         $script:NativeProcessExitCodesByComputerName = @{}
         $script:NativeProcessStandardOutputsByComputerName = @{}
         $script:NativeProcessStandardErrorsByComputerName = @{}
+        $script:NativeStageCopyScriptPaths = @()
+        $script:NativeStageCopyPlans = @()
+        $script:NativeStageCleanupPlans = @()
+        $script:NativeStageCopyError = $null
+        $script:NativeStageCleanupError = $null
         $script:FixtureScript = Join-Path -Path $TestDrive -ChildPath 'Invoke-WinPushScript-Fixture.ps1'
         Set-Content -LiteralPath $script:FixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
     }
@@ -267,6 +282,8 @@ Describe 'Invoke-WinPushScript' {
             $standardError = $script:NativeProcessStandardErrorsByComputerName[$computerName]
         }
 
+        $script:OperationOrder += ('Native:{0}' -f $computerName)
+
         [pscustomobject] [ordered] @{
             PSTypeName      = 'WinPush.NativeProcessResult'
             FilePath        = $FilePath
@@ -274,6 +291,46 @@ Describe 'Invoke-WinPushScript' {
             ExitCode        = $exitCode
             StandardOutput  = $standardOutput
             StandardError   = $standardError
+        }
+    }
+
+    Mock Copy-WinPushNativeScriptToStage {
+        param(
+            [string] $ComputerName,
+            [string] $ScriptPath,
+            $StagePlan,
+            [string] $Transport,
+            [AllowNull()]
+            [string] $PsExecPath
+        )
+
+        $null = $Transport
+        $null = $PsExecPath
+        $script:NativeStageCopyScriptPaths += $ScriptPath
+        $script:NativeStageCopyPlans += $StagePlan
+        $script:OperationOrder += ('Stage:{0}' -f $ComputerName)
+
+        if ($null -ne $script:NativeStageCopyError) {
+            throw $script:NativeStageCopyError
+        }
+    }
+
+    Mock Remove-WinPushNativeScriptStage {
+        param(
+            [string] $ComputerName,
+            $StagePlan,
+            [string] $Transport,
+            [AllowNull()]
+            [string] $PsExecPath
+        )
+
+        $null = $Transport
+        $null = $PsExecPath
+        $script:NativeStageCleanupPlans += $StagePlan
+        $script:OperationOrder += ('Cleanup:{0}' -f $ComputerName)
+
+        if ($null -ne $script:NativeStageCleanupError) {
+            throw $script:NativeStageCleanupError
         }
     }
 
@@ -976,7 +1033,7 @@ Describe 'Invoke-WinPushScript' {
         (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'first error,second error'
     }
 
-    It 'runs one script through WinRM transport using encoded local script content' {
+    It 'runs one script through WinRM transport using a staged remote script file' {
         $script:NativeProcessStandardOutput = "winrm script output`r`n"
 
         $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM
@@ -991,10 +1048,20 @@ Describe 'Invoke-WinPushScript' {
         @($script:NativeProcessArgumentLists[0]).Count | Should Be 2
         $script:NativeProcessArgumentLists[0][0] | Should Be '-r:PC-001'
         $script:NativeProcessArgumentLists[0][1] | Should Match ([regex]::Escape('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand '))
+        $decodedScriptCommand = ConvertFrom-TestEncodedCommand -Command $script:NativeProcessArgumentLists[0][1]
+        $decodedScriptCommand | Should Match ([regex]::Escape("& { & 'C:\Windows\Temp\WinPush\"))
+        $decodedScriptCommand | Should Match ([regex]::Escape("\Invoke-WinPushScript-Fixture.ps1' }"))
+        @($script:NativeStageCopyPlans).Count | Should Be 1
+        $script:NativeStageCopyScriptPaths[0] | Should Be (Get-Item -LiteralPath $script:FixtureScript).FullName
+        $script:NativeStageCopyPlans[0].RemoteDirectory | Should Match ([regex]::Escape('C:\Windows\Temp\WinPush\'))
+        @($script:NativeStageCleanupPlans).Count | Should Be 1
+        $script:NativeStageCleanupPlans[0].RemoteDirectory | Should Be $script:NativeStageCopyPlans[0].RemoteDirectory
+        ($script:OperationOrder -join ',') | Should Be 'Stage:PC-001,Native:PC-001,Cleanup:PC-001'
         @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
     }
 
-    It 'runs one script through PsExec transport using encoded local script content' {
+    It 'runs one script through PsExec transport using a staged remote script file' {
         $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-script.exe'
         Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
         $resolvedPsExecPath = (Get-Item -LiteralPath $psExecPath).FullName
@@ -1008,14 +1075,24 @@ Describe 'Invoke-WinPushScript' {
         $result.Output[0] | Should Be 'psexec script output'
         @($script:NativeProcessFilePaths).Count | Should Be 1
         $script:NativeProcessFilePaths[0] | Should Be $resolvedPsExecPath
-        @($script:NativeProcessArgumentLists[0]).Count | Should Be 6
+        @($script:NativeProcessArgumentLists[0]).Count | Should Be 7
         $script:NativeProcessArgumentLists[0][0] | Should Be '\\PC-001'
-        $script:NativeProcessArgumentLists[0][1] | Should Be 'cmd.exe'
-        $script:NativeProcessArgumentLists[0][2] | Should Be '/d'
-        $script:NativeProcessArgumentLists[0][3] | Should Be '/s'
-        $script:NativeProcessArgumentLists[0][4] | Should Be '/c'
-        $script:NativeProcessArgumentLists[0][5] | Should Match ([regex]::Escape('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand '))
+        $script:NativeProcessArgumentLists[0][1] | Should Be '-h'
+        $script:NativeProcessArgumentLists[0][2] | Should Be 'cmd.exe'
+        $script:NativeProcessArgumentLists[0][3] | Should Be '/d'
+        $script:NativeProcessArgumentLists[0][4] | Should Be '/s'
+        $script:NativeProcessArgumentLists[0][5] | Should Be '/c'
+        $script:NativeProcessArgumentLists[0][6] | Should Match ([regex]::Escape('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand '))
+        $decodedScriptCommand = ConvertFrom-TestEncodedCommand -Command $script:NativeProcessArgumentLists[0][6]
+        $decodedScriptCommand | Should Match ([regex]::Escape("& { & 'C:\Windows\Temp\WinPush\"))
+        $decodedScriptCommand | Should Match ([regex]::Escape("\Invoke-WinPushScript-Fixture.ps1' }"))
+        @($script:NativeStageCopyPlans).Count | Should Be 1
+        $script:NativeStageCopyPlans[0].RemoteDirectory | Should Match ([regex]::Escape('C:\Windows\Temp\WinPush\'))
+        @($script:NativeStageCleanupPlans).Count | Should Be 1
+        $script:NativeStageCleanupPlans[0].RemoteDirectory | Should Be $script:NativeStageCopyPlans[0].RemoteDirectory
+        ($script:OperationOrder -join ',') | Should Be 'Stage:PC-001,Native:PC-001,Cleanup:PC-001'
         @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
     }
 
     It 'captures WinRM script output to artifact files when requested' {
@@ -1060,6 +1137,47 @@ Describe 'Invoke-WinPushScript' {
         @($summaryRows).Count | Should Be 1
         $summaryRows[0].Operation | Should Be 'RunScript'
         $summaryRows[0].Transport | Should Be 'PsExec'
+    }
+
+    It 'keeps the staged native script when requested' {
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM -KeepStagedScript
+
+        $result.Succeeded | Should Be $true
+        @($script:NativeStageCopyPlans).Count | Should Be 1
+        @($script:NativeProcessFilePaths).Count | Should Be 1
+        @($script:NativeStageCleanupPlans).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
+        ($script:OperationOrder -join ',') | Should Be 'Stage:PC-001,Native:PC-001'
+    }
+
+    It 'returns a failed native script result when staging fails and attempts cleanup' {
+        $script:NativeStageCopyError = 'stage copy failed'
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'stage copy failed'
+        $result.Errors[0] | Should Be 'stage copy failed'
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NativeStageCleanupPlans).Count | Should Be 1
+        @($script:RemovedSessionIds).Count | Should Be 0
+        ($script:OperationOrder -join ',') | Should Be 'Stage:PC-001,Cleanup:PC-001'
+    }
+
+    It 'returns a failed native script result when cleanup fails after script success' {
+        $script:NativeStageCleanupError = 'cleanup failed'
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'cleanup failed'
+        $result.Output[0] | Should Be 'native script output'
+        $result.Errors[0] | Should Be 'cleanup failed'
+        @($script:NativeStageCleanupPlans).Count | Should Be 1
+        @($script:RemovedSessionIds).Count | Should Be 0
+        ($script:OperationOrder -join ',') | Should Be 'Stage:PC-001,Native:PC-001,Cleanup:PC-001'
     }
 
     It 'rejects native script credentials before launching a native process' {

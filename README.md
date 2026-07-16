@@ -196,6 +196,8 @@ Invoke-WinPushScript `
     -Transport WinRM
 ```
 
+Native script transports copy the script through small native PowerShell staging commands, invoke the staged file under `C:\Windows\Temp\WinPush\<stage-id>\`, and remove the staged folder after execution. Use `-KeepStagedScript` only when you need to inspect the staged file after a run.
+
 Copy a file to a target:
 
 ```powershell
@@ -251,7 +253,8 @@ This module does not write generated runtime output back into the repository.
 - current Windows identity or supplied `PSCredential` authorized on the target
 - Azure DevOps feed read access when installing from `SCFModules`
 - target-side permissions for the requested command, script, file copy, or log retrieval operation
-- PsExec available locally when using `-Transport PsExec`
+- elevated PowerShell when using WinRM or PsExec native transports
+- PsExec available locally when using `-Transport PsExec`; WinPush invokes it with `-h` so the remote process uses an elevated token when available
 
 ## Testing
 
