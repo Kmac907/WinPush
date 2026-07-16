@@ -160,7 +160,7 @@ Planned defaults:
 
 Published modules are installed from the private `SCFModules` Azure Artifacts NuGet feed.
 
-Published package versions are immutable. If any shipped file changes, including manifest-declared format files such as `WinPush.format.ps1xml`, the `ModuleVersion` in `WinPush.psd1` must be increased before publishing. Installing with `-Reinstall` refreshes the same published version only; it does not make Azure Artifacts replace an existing package version with new contents.
+Published package versions are immutable. The source `ModuleVersion` in `WinPush.psd1` tracks the human-managed release line as `major.minor.0`; CI replaces only the patch number with the Azure DevOps build ID in the staged package before publishing. Installing with `-Reinstall` refreshes the same published version only; it does not make Azure Artifacts replace an existing package version with new contents.
 
 Register the repository once per machine from an elevated PowerShell 7 session:
 
@@ -183,7 +183,6 @@ Install the module:
 Install-PSResource `
     -Name WinPush `
     -Repository SCFModules `
-    -Version 0.1.1 `
     -Scope AllUsers
 ```
 
@@ -196,7 +195,6 @@ $Credential = [pscredential]::new('AzureDevOps', $Pat)
 Install-PSResource `
     -Name WinPush `
     -Repository SCFModules `
-    -Version 0.1.1 `
     -Scope AllUsers `
     -Credential $Credential
 ```
@@ -276,6 +274,8 @@ The module manifest includes package metadata required by PSResourceGet packagin
 - `PrivateData.PSData.ProjectUri`
 
 `ProjectUri` must not be empty. Empty package metadata can cause `Compress-PSResource` to fail during CI packaging. Files declared by manifest paths must be included in the staged package root before `Compress-PSResource` runs.
+
+The source manifest version must stay in `major.minor.0` form. The CI package step keeps `major.minor` from the source manifest and writes the Azure DevOps build ID as the package patch version in the staged manifest only.
 
 ---
 
@@ -629,9 +629,9 @@ The module foundation, result contracts, target resolution, connectivity checks 
 
 ## Version
 
-Current version: `0.1.1`
+Current version: `0.1.0`
 
-Version source: `WinPush.psd1`
+Version source: `WinPush.psd1` defines the source release line. Published packages use the same `major.minor` with an automated build-ID patch.
 
 Release notes: release notes are not tracked separately.
 
