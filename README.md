@@ -6,6 +6,37 @@
 
 The module currently exports completed PSRP connectivity checks, `Invoke-WinPushCommand` execution for direct, pipeline, or host-file targets with optional captured-output artifacts and command-attached logs, direct, pipeline, or host-file local `.ps1` execution through `Invoke-WinPushScript` with optional credential support, captured-output artifacts, and script-attached logs, single-file PSRP upload/download through `Copy-WinPushItem`, and direct, pipeline, or host-file remote log directory copy through `Get-WinPushLog`.
 
+The module provides:
+
+- PSRP target connectivity checks
+- remote command and local script execution
+- single-file upload and download
+- remote log retrieval
+- structured per-target result objects
+
+---
+
+## Purpose
+
+This module exists to provide a repeatable PowerShell 7 controller workflow for Windows endpoint administration over PSRP/WinRM.
+
+Operationally, it is intended to:
+
+- validate whether Windows targets can accept PSRP sessions
+- run controlled command text or local `.ps1` files on one or more targets
+- copy single files to or from a target
+- retrieve immediate files from an explicit remote log directory
+- write optional local execution artifacts for review
+
+Out of scope:
+
+- automatic WinRM, firewall, TrustedHosts, certificate, endpoint, or policy configuration
+- credential storage
+- broad package orchestration until `Invoke-WinPushPackage` is implemented
+- recursive transfer, parallel fan-out, retries, or SSH transport
+
+---
+
 ## Scope
 
 In scope for the MVP:
@@ -39,6 +70,8 @@ WinPush/
 ```
 
 `build/build.ps1` is a module-local quality gate for developer and CI validation. It is not runtime code and does not contain Azure DevOps pipeline-only logic.
+
+Runtime implementation is isolated to this module folder under `src/`. Runtime code must not import helper code from sibling module folders. `packaging/` is not used.
 
 Generated build and validation output is written under `artifacts/`, which is ignored and should not be committed.
 
@@ -111,10 +144,93 @@ Planned defaults:
 
 ## Prerequisites
 
-- Windows controller.
-- PowerShell 7.6 or later.
+- PowerShell 7.6 or later
+- Windows controller
+- Windows targets reachable over WinRM/PSRP
+- current Windows identity or supplied `PSCredential` authorized on the target
+- Azure DevOps feed read access when installing from `SCFModules`
+- target-side permissions for the requested command, script, file copy, or log retrieval operation
 
-## Local Development Import
+---
+
+## Installation
+
+### Install From SCFModules Feed
+
+Published modules are installed from the private `SCFModules` Azure Artifacts NuGet feed.
+
+Register the repository once per machine or user profile:
+
+```powershell
+$FeedUri = 'https://pkgs.dev.azure.com/scfitops/_packaging/SCFModules/nuget/v3/index.json'
+
+Install-Module Microsoft.PowerShell.PSResourceGet -Scope CurrentUser -Force -AllowClobber
+
+Register-PSResourceRepository `
+    -Name SCFModules `
+    -Uri $FeedUri `
+    -Trusted `
+    -ApiVersion V3 `
+    -Force
+```
+
+Install the module:
+
+```powershell
+Install-PSResource `
+    -Name WinPush `
+    -Repository SCFModules `
+    -Scope AllUsers
+```
+
+If Azure DevOps authentication fails with `401 Unauthorized`, pass a credential created from a PAT with `Packaging: Read`:
+
+```powershell
+$Pat = Read-Host 'Azure DevOps PAT' -AsSecureString
+$Credential = [pscredential]::new('AzureDevOps', $Pat)
+
+Install-PSResource `
+    -Name WinPush `
+    -Repository SCFModules `
+    -Scope AllUsers `
+    -Credential $Credential
+```
+
+Use `-Scope CurrentUser` instead of `-Scope AllUsers` when installing without administrative rights.
+
+Verify installation with the same scope used during install:
+
+```powershell
+Get-Module -ListAvailable WinPush |
+    Select-Object Name, Version, ModuleBase
+
+Get-InstalledPSResource -Name WinPush -Scope AllUsers
+```
+
+For a current-user install, use:
+
+```powershell
+Get-InstalledPSResource -Name WinPush -Scope CurrentUser
+```
+
+Import the module and verify its exported commands:
+
+```powershell
+Import-Module WinPush -Force
+Get-Command -Module WinPush
+```
+
+### Install From Repository
+
+For repository-based installation, use the shared installer tool from the `Tools` repository:
+
+```powershell
+Install-EndpointEngineeringModule -ModuleName WinPush -Force
+```
+
+`Install-EndpointEngineeringModule` must be available in the current PowerShell session before running this command. Follow the README under `Tools/Install-EndpointEngineeringModule` for that tool.
+
+### Local Development Import
 
 From this module folder:
 
@@ -138,7 +254,19 @@ Invoke-WinPushScript
 Test-WinPushTarget
 ```
 
-## Runnable MVP Examples
+### Package Metadata
+
+The module manifest includes package metadata required by PSResourceGet packaging:
+
+- `Description`
+- `PrivateData.PSData.Tags`
+- `PrivateData.PSData.ProjectUri`
+
+`ProjectUri` must not be empty. Empty package metadata can cause `Compress-PSResource` to fail during CI packaging.
+
+---
+
+## Usage
 
 The examples below assume `PC01` is a Windows target reachable over WinRM/PSRP and that the caller is authorized to create files under `C:\Windows\Temp` and `C:\ProgramData\EA\Logs` on that target. Replace `PC01` with a reachable target in your environment.
 
@@ -267,6 +395,68 @@ Invoke-WinPushScript `
   -OutputRoot $OutputRoot
 ```
 
+---
+
+## Execution Context
+
+Documented execution assumptions:
+
+- execution mode: interactive or automation
+- user context: current Windows user or caller-supplied `PSCredential`
+- supported shell: PowerShell 7.6+
+- network requirements: controller-to-target WinRM/PSRP connectivity
+- authentication model: current identity or explicit `PSCredential`
+
+This module should be run only by operators or automation identities that have permission to create PSRP sessions and perform the requested action on each target.
+
+---
+
+## Parameters And Inputs
+
+| Command | Parameter | Required | Default | Purpose |
+| --- | --- | --- | --- | --- |
+| `Test-WinPushTarget` | `ComputerName` | Yes for direct or pipeline target input | None | Target names supplied directly, by pipeline string, or by pipeline property name. |
+| `Test-WinPushTarget` | `HostFile` | Yes for host-file input | None | UTF-8 file containing target names. |
+| `Test-WinPushTarget` | `Credential` | No | Current identity | Credential used for PSRP session creation. |
+| `Invoke-WinPushCommand` | `ComputerName` | Yes for direct or pipeline target input | None | Target names supplied directly, by pipeline string, or by pipeline property name. |
+| `Invoke-WinPushCommand` | `HostFile` | Yes for host-file input | None | UTF-8 file containing target names. |
+| `Invoke-WinPushCommand` | `Command` | Yes | None | PowerShell command text to run remotely. |
+| `Invoke-WinPushCommand` | `Transport` | No | `Psrp` | Transport mode: `Psrp` or limited `WinRM`/`winrs.exe`. |
+| `Invoke-WinPushCommand` | `Credential` | No | Current identity | Credential used for PSRP session creation. |
+| `Invoke-WinPushCommand` | `CaptureOutput` | No | `$false` | Writes summary and per-target output artifacts under `OutputRoot`. |
+| `Invoke-WinPushCommand` | `Logs` | No | `$false` | Copies immediate files from the convention-based command log directory. |
+| `Invoke-WinPushCommand` | `OutputRoot` | No | `C:\WinPush` | Local root for generated run artifacts. |
+| `Invoke-WinPushScript` | `ComputerName` | Yes for direct or pipeline target input | None | Target names supplied directly, by pipeline string, or by pipeline property name. |
+| `Invoke-WinPushScript` | `HostFile` | Yes for host-file input | None | UTF-8 file containing target names. |
+| `Invoke-WinPushScript` | `ScriptPath` | Yes | None | Existing local `.ps1` file to run remotely through PSRP. |
+| `Invoke-WinPushScript` | `Credential` | No | Current identity | Credential used for PSRP session creation. |
+| `Invoke-WinPushScript` | `CaptureOutput` | No | `$false` | Writes summary and per-target output artifacts under `OutputRoot`. |
+| `Invoke-WinPushScript` | `Logs` | No | `$false` | Copies immediate files from the convention-based script log directory. |
+| `Invoke-WinPushScript` | `OutputRoot` | No | `C:\WinPush` | Local root for generated run artifacts. |
+| `Copy-WinPushItem` | `ComputerName` | Yes | None | Single target name. |
+| `Copy-WinPushItem` | `Path` | Yes | None | Local source path for upload, or remote source path for download. |
+| `Copy-WinPushItem` | `Destination` | Yes | None | Remote destination for upload, or local destination for download. |
+| `Copy-WinPushItem` | `Direction` | No | `Upload` | Transfer direction: `Upload` or `Download`. |
+| `Copy-WinPushItem` | `Credential` | No | Current identity | Credential used for PSRP session creation. |
+| `Get-WinPushLog` | `ComputerName` | Yes for direct or pipeline target input | None | Target names supplied directly, by pipeline string, or by pipeline property name. |
+| `Get-WinPushLog` | `HostFile` | Yes for host-file input | None | UTF-8 file containing target names. |
+| `Get-WinPushLog` | `RemoteDirectory` | Yes | None | Absolute remote Windows directory containing immediate log files to copy. |
+| `Get-WinPushLog` | `OutputRoot` | No | `C:\WinPush` | Local root for generated run artifacts. |
+| `Get-WinPushLog` | `Credential` | No | Current identity | Credential used for PSRP session creation. |
+
+Input behavior:
+
+- direct target arrays, pipeline strings, pipeline `ComputerName` properties, and host files are supported where documented per command
+- `Copy-WinPushItem` intentionally supports one target and one file per call
+- host files must resolve to deterministic target names before remote work starts
+- script execution accepts existing local `.ps1` files only
+
+Avoid:
+
+- passing empty target names, command text, script paths, destination paths, output roots, or remote log directories
+- using wildcard-expanded file transfer paths
+- assuming WinPush configures WinRM or target firewall policy
+
 ## Output
 
 `Test-WinPushTarget`, `Invoke-WinPushCommand`, `Invoke-WinPushScript`, `Copy-WinPushItem`, and `Get-WinPushLog` return structured PowerShell objects with `PSTypeName = WinPush.ExecutionResult`.
@@ -276,9 +466,65 @@ Invoke-WinPushScript `
 | `WinPush.ExecutionResult` | Per-target operation result envelope. |
 | `WinPush.LogResult` | Per-file remote log copy result. |
 
+Generated files, logs, reports, or receipts:
+
+| Artifact | Location | Purpose | Retention |
+| --- | --- | --- | --- |
+| Run summary | `<OutputRoot>\<timestamp>\summary.csv` | Run-level CSV summary for captured command or script output. | Operator controlled. |
+| Per-target result | `<OutputRoot>\<timestamp>\<ComputerName>\result.txt` | Human-readable per-target result detail. | Operator controlled. |
+| Per-target output | `<OutputRoot>\<timestamp>\<ComputerName>\stdout.txt` | Captured output stream content. | Operator controlled. |
+| Per-target errors | `<OutputRoot>\<timestamp>\<ComputerName>\stderr.txt` | Captured error stream content. | Operator controlled. |
+| Copied logs | `<OutputRoot>\<timestamp>\<ComputerName>\Logs\` | Immediate files copied from documented remote log directories. | Operator controlled. |
+
+This module does not write generated runtime output back into the repository.
+
 ## Side Effects
 
 Importing the module loads functions from the module-local `Private` and `Public` folders. It does not open network connections, create remote sessions, write generated runtime output, or persist state. `Copy-WinPushItem` creates one temporary PSRP session and uploads or downloads one caller-selected file without writing local artifacts or logs. `Get-WinPushLog` creates one temporary PSRP session per resolved target, enumerates immediate regular files in one caller-selected remote directory, and copies those files under one timestamped local run folder with one `Logs` folder per target. `Invoke-WinPushCommand -Logs` reuses the command PSSession, derives the remote log source from the command name, and copies immediate log files under the target `Logs` folder. `Invoke-WinPushScript -Logs` reuses the script PSSession, derives the remote log source from the local script base name, and copies immediate log files under the target `Logs` folder. `Invoke-WinPushCommand -CaptureOutput` and `Invoke-WinPushScript -CaptureOutput` write local run artifacts under `C:\WinPush` by default, or under the caller-supplied `-OutputRoot`. Captured runs include run-level `summary.csv`, per-target `result.txt`, `stdout.txt`, and `stderr.txt`.
+
+Destructive or persistent behavior:
+
+- remote command and script behavior is determined by caller-supplied command text or script content
+- uploads and downloads write to caller-selected paths
+- captured output and copied logs persist under the caller-selected local `OutputRoot`
+- temporary PSRP sessions are created for the duration of each target operation
+
+---
+
+## Error Handling
+
+The module fails or returns failed per-target results when:
+
+- target names are empty or invalid
+- host files are invalid or unavailable
+- command text is empty
+- script paths are missing, directories, or not `.ps1` files
+- copy paths or destinations are empty or unsupported
+- remote log directories are empty, non-absolute, missing, inaccessible, or not directories
+- PSRP session creation fails
+- remote command or script execution returns errors
+- file transfer or log copy fails
+
+Recoverable conditions:
+
+- multi-target command, script, connectivity, and log operations continue after one target fails
+- log copy attempts continue after an individual file copy fails
+- failed target results preserve error detail in the returned object
+
+Errors should be explicit, actionable, and safe for production troubleshooting.
+
+---
+
+## Known Limitations
+
+- PowerShell 7.6 `Core` is the supported controller shell.
+- Windows PowerShell 5.1 compatibility is not guaranteed.
+- `Invoke-WinPushPackage` is planned but not implemented or exported.
+- SSH transport, retries, parallel fan-out, persistent sessions, and transport fallback are not implemented.
+- Automatic WinRM, firewall, TrustedHosts, certificate, endpoint, or policy configuration is not implemented.
+- Recursive file transfer, recursive log enumeration, and multi-target file transfer are not implemented.
+- Script arguments are not implemented for `Invoke-WinPushScript`.
+- `Copy-WinPushItem` supports one target and one file per call.
 
 ## Testing
 
@@ -299,6 +545,45 @@ Test-ModuleManifest .\WinPush.psd1
 Import-Module .\WinPush.psd1 -Force
 ```
 
+Recommended validation:
+
+- parse all `.ps1`, `.psm1`, and `.psd1` files
+- import the module from the manifest
+- verify exported commands
+- validate manifest metadata and required module files
+- run mocked or non-destructive unit tests where practical
+
+---
+
+## Rollback Or Recovery
+
+To remove a PSResourceGet installation:
+
+```powershell
+Uninstall-PSResource -Name WinPush -Scope AllUsers
+```
+
+Use `-Scope CurrentUser` when the module was installed to the current-user scope.
+
+To remove a repository-installed current-user module:
+
+```powershell
+Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'PowerShell\Modules\WinPush') -Recurse -Force
+```
+
+For Windows PowerShell 5.1, also check:
+
+```text
+Documents\WindowsPowerShell\Modules\WinPush
+```
+
+Additional cleanup:
+
+- remove local captured output or copied logs under `C:\WinPush` or the caller-supplied `OutputRoot` when no longer needed
+- remove any remote files or changes created by caller-supplied command text, scripts, or file transfers
+
+---
+
 ## Maturity
 
 `Testing`
@@ -311,8 +596,30 @@ Current version: `0.1.0`
 
 Version source: `WinPush.psd1`
 
+Release notes: release notes are not tracked separately.
+
 ## Ownership And Support
 
 - Owner: Endpoint Engineering
 - Support contact: Endpoint Engineering
 - Repository path: `Modules/WinPush`
+
+---
+
+## Support Files
+
+- `src/`: runtime entry points and implementation logic
+- `src/Public/`: exported command implementations
+- `src/Private/`: module-local runtime helper code
+- `tests/`: validation and regression coverage
+- `build/`: module-local build and quality-gate entry point
+- `artifacts/`: ignored generated build, test, coverage, and validation output
+
+---
+
+## Notes
+
+- Keep README content aligned with the module manifest, exported commands, parameters, and output behavior.
+- Do not commit secrets, tokens, private keys, certificates, or credential-bearing connection strings.
+- Do not commit runtime-generated logs, exports, receipts, state files, or packages unless they are documented contract examples.
+- Prefer explicit parameters, clear failure behavior, and safe defaults.
