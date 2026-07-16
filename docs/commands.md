@@ -6,7 +6,7 @@
 | --- | --- |
 | `Test-WinPushTarget` | Tests PSRP session creation for direct `-ComputerName`, pipeline, or `-HostFile` targets sequentially using the current Windows identity or an optional `-Credential`. Returns one `WinPush.ExecutionResult` per resolved target. |
 | `Invoke-WinPushCommand` | Runs non-empty command text on direct `-ComputerName`, pipeline, pipeline-by-property-name `ComputerName`, or `-HostFile` targets. PSRP is the default transport. `-Transport WinRM` runs current-identity commands through `winrs.exe`. `-Transport PsExec` runs current-identity commands through operator-supplied `PsExec.exe`. |
-| `Invoke-WinPushScript` | Runs one existing local `.ps1` file on direct `-ComputerName`, pipeline, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP using `Invoke-Command -FilePath`. |
+| `Invoke-WinPushScript` | Runs one existing local `.ps1` file on direct `-ComputerName`, pipeline, pipeline-by-property-name `ComputerName`, or `-HostFile` targets. PSRP uses `Invoke-Command -FilePath`. WinRM and PsExec execute encoded local script content through remote Windows PowerShell. |
 | `Copy-WinPushItem` | Uploads one existing local file to one target through `Copy-Item -ToSession`, or downloads one remote file through `Copy-Item -FromSession` when `-Direction Download` is supplied. |
 | `Get-WinPushLog` | Copies immediate regular files from one explicit absolute remote Windows directory to the target's local `Logs` folder under a timestamped output run folder. |
 
@@ -34,7 +34,7 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 | `-Transport` | `Psrp`, `WinRM`, `PsExec` | Optional. Defaults to `Psrp`. |
 | `-PsExecPath` | `string` | Optional path to `PsExec.exe`; only valid with `-Transport PsExec`. |
 | `-Credential` | `PSCredential` | Optional PSRP credential. Not supported with `WinRM` or `PsExec`. |
-| `-CaptureOutput` | switch | Writes `summary.csv`, `result.txt`, `stdout.txt`, and `stderr.txt`. Not supported with `WinRM` or `PsExec`. |
+| `-CaptureOutput` | switch | Writes `summary.csv`, `result.txt`, `stdout.txt`, and `stderr.txt`. Supported with every transport. |
 | `-Logs` | switch | Copies convention-based command logs. Not supported with `WinRM` or `PsExec`. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
 
@@ -47,9 +47,11 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 | `-ComputerName` | `string[]` | Target names. Also accepts pipeline strings and pipeline objects with a `ComputerName` property. |
 | `-HostFile` | `string` | UTF-8 file containing target names. |
 | `-ScriptPath` | `string` | Existing local `.ps1` file. Required. |
-| `-Credential` | `PSCredential` | Optional PSRP credential. Uses the current identity when omitted. |
-| `-CaptureOutput` | switch | Writes `summary.csv`, `result.txt`, `stdout.txt`, and `stderr.txt`. |
-| `-Logs` | switch | Copies convention-based script logs. |
+| `-Transport` | `Psrp`, `WinRM`, `PsExec` | Optional. Defaults to `Psrp`. |
+| `-PsExecPath` | `string` | Optional path to `PsExec.exe`; only valid with `-Transport PsExec`. |
+| `-Credential` | `PSCredential` | Optional PSRP credential. Not supported with `WinRM` or `PsExec`. |
+| `-CaptureOutput` | switch | Writes `summary.csv`, `result.txt`, `stdout.txt`, and `stderr.txt`. Supported with every transport. |
+| `-Logs` | switch | Copies convention-based script logs. Not supported with `WinRM` or `PsExec`. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
 
 Target input is required from either `-ComputerName`, pipeline input, or `-HostFile`.
@@ -99,7 +101,9 @@ WinRM transport launches `winrs.exe` once per resolved target. It keeps native s
 
 PsExec transport launches operator-supplied or PATH-discovered `PsExec.exe` once per resolved target. PsExec executes the supplied command text through remote `cmd.exe /d /s /c`. WinPush does not download, bundle, license, or redistribute PsExec.
 
-`-Credential`, `-CaptureOutput`, and `-Logs` are rejected for WinRM and PsExec before launching a process.
+Native script transports encode the local `.ps1` file content and execute it through remote `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand`. This runs the script content without staging the script file on the target.
+
+`-Credential` and `-Logs` are rejected for WinRM and PsExec before launching a process. `-CaptureOutput` is supported for command and script execution on every transport.
 
 ## Logs
 
@@ -146,4 +150,5 @@ Command and script behavior is determined by caller-supplied command text or scr
 - Automatic WinRM, firewall, TrustedHosts, certificate, endpoint, or policy configuration is not implemented.
 - Recursive file transfer, recursive log enumeration, and multi-target file transfer are not implemented.
 - Script arguments are not implemented for `Invoke-WinPushScript`.
+- Native script transports execute encoded script content and do not support `-Credential` or `-Logs`.
 - `Copy-WinPushItem` supports one target and one file per call.

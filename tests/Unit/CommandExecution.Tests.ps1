@@ -1144,14 +1144,29 @@ Describe 'Invoke-WinPushCommand' {
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
-    It 'rejects PsExec capture-output artifacts before launching a native process' {
+    It 'captures PsExec command output to artifact files when requested' {
         $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-capture.exe'
         Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $script:NativeProcessStandardOutput = "native output`r`n"
+        $script:NativeProcessStandardError = "native warning`r`n"
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
 
-        { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath -CaptureOutput -OutputRoot $TestDrive } |
-            Should Throw 'CaptureOutput is not supported when Transport is PsExec.'
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath -CaptureOutput -OutputRoot $outputRoot
 
-        @($script:NativeProcessFilePaths).Count | Should Be 0
+        $result.Transport | Should Be 'PsExec'
+        $result.Succeeded | Should Be $true
+        $result.RunDirectory.StartsWith($outputRoot) | Should Be $true
+        $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt')
+        $result.StdOutPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt')
+        $result.StdErrPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt')
+        (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'native output'
+        (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'native warning'
+        $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'))
+        @($summaryRows).Count | Should Be 1
+        $summaryRows[0].Transport | Should Be 'PsExec'
+        $summaryRows[0].Operation | Should Be 'RunCommand'
+        @($script:NativeProcessFilePaths).Count | Should Be 1
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
@@ -1508,11 +1523,27 @@ Describe 'Invoke-WinPushCommand' {
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
-    It 'rejects WinRM capture-output artifacts before launching a native process' {
-        { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport WinRM -CaptureOutput -OutputRoot $TestDrive } |
-            Should Throw 'CaptureOutput is not supported when Transport is WinRM.'
+    It 'captures WinRM command output to artifact files when requested' {
+        $script:NativeProcessStandardOutput = "winrs output`r`n"
+        $script:NativeProcessStandardError = "winrs warning`r`n"
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
 
-        @($script:NativeProcessFilePaths).Count | Should Be 0
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport WinRM -CaptureOutput -OutputRoot $outputRoot
+
+        $result.Transport | Should Be 'WinRM'
+        $result.Succeeded | Should Be $true
+        $result.RunDirectory.StartsWith($outputRoot) | Should Be $true
+        $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt')
+        $result.StdOutPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt')
+        $result.StdErrPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt')
+        (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'winrs output'
+        (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'winrs warning'
+        $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'))
+        @($summaryRows).Count | Should Be 1
+        $summaryRows[0].Transport | Should Be 'WinRM'
+        $summaryRows[0].Operation | Should Be 'RunCommand'
+        @($script:NativeProcessFilePaths).Count | Should Be 1
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 

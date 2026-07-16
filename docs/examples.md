@@ -53,6 +53,17 @@ Invoke-WinPushCommand `
     -Transport WinRM
 ```
 
+Run command text through WinRS and capture output artifacts:
+
+```powershell
+Invoke-WinPushCommand `
+    -ComputerName $ComputerName `
+    -Command 'hostname' `
+    -Transport WinRM `
+    -CaptureOutput `
+    -OutputRoot $OutputRoot
+```
+
 Run command text through WinRS across resolved targets:
 
 ```powershell
@@ -98,6 +109,25 @@ Invoke-WinPushScript `
     -ScriptPath $ScriptPath `
     -CaptureOutput `
     -OutputRoot $OutputRoot
+```
+
+Run a local script through WinRS:
+
+```powershell
+Invoke-WinPushScript `
+    -ComputerName $ComputerName `
+    -ScriptPath $ScriptPath `
+    -Transport WinRM
+```
+
+Run a local script through PsExec:
+
+```powershell
+Invoke-WinPushScript `
+    -ComputerName $ComputerName `
+    -ScriptPath $ScriptPath `
+    -Transport PsExec `
+    -PsExecPath 'C:\Tools\PsExec.exe'
 ```
 
 ## File Transfer

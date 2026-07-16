@@ -11,6 +11,12 @@ function Invoke-WinPushScript {
         [Parameter(Mandatory, Position = 1)]
         [string] $ScriptPath,
 
+        [ValidateSet('Psrp', 'WinRM', 'PsExec')]
+        [string] $Transport = 'Psrp',
+
+        [AllowNull()]
+        [string] $PsExecPath,
+
         [System.Management.Automation.PSCredential] $Credential,
 
         [switch] $CaptureOutput,
@@ -63,7 +69,27 @@ function Invoke-WinPushScript {
             $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
         }
 
+        if ($Transport -ne 'PsExec' -and $PSBoundParameters.ContainsKey('PsExecPath')) {
+            throw [System.NotSupportedException]::new('PsExecPath is only supported when Transport is PsExec.')
+        }
+
+        if ($Transport -eq 'WinRM' -or $Transport -eq 'PsExec') {
+            if ($PSBoundParameters.ContainsKey('Credential')) {
+                throw [System.NotSupportedException]::new(('Credential is not supported when Transport is {0}.' -f $Transport))
+            }
+
+            if ($Logs) {
+                throw [System.NotSupportedException]::new(('Logs is not supported when Transport is {0}.' -f $Transport))
+            }
+        }
+
         $sharedRunDirectory = $null
+        $nativeScriptCommand = if ($Transport -eq 'WinRM' -or $Transport -eq 'PsExec') {
+            New-WinPushNativeScriptCommand -ScriptPath $resolvedScriptPath
+        }
+        else {
+            $null
+        }
 
         foreach ($target in $targets) {
             $session = $null
@@ -81,6 +107,108 @@ function Invoke-WinPushScript {
 
             if ($PSBoundParameters.ContainsKey('Credential')) {
                 $sessionParameters['Credential'] = $Credential
+            }
+
+            if ($Transport -eq 'WinRM' -or $Transport -eq 'PsExec') {
+                try {
+                    $scriptResult = if ($Transport -eq 'WinRM') {
+                        Invoke-WinPushWinRsCommand -ComputerName $target -Command $nativeScriptCommand
+                    }
+                    else {
+                        Invoke-WinPushPsExecCommand -ComputerName $target -Command $nativeScriptCommand -PsExecPath $PsExecPath
+                    }
+
+                    $exitCode = $scriptResult.ExitCode
+                    $output = @($scriptResult.Output)
+                    $errors = @($scriptResult.Errors)
+                    $succeeded = $exitCode -eq 0
+                    $nativeTransportName = if ($Transport -eq 'WinRM') { 'WinRS' } else { $Transport }
+                    $errorMessage = if ($succeeded) {
+                        $null
+                    }
+                    else {
+                        $firstError = @($errors | Where-Object { -not [string]::IsNullOrWhiteSpace([string] $_) } | Select-Object -First 1)
+                        if ($firstError.Count -gt 0) {
+                            ([string] $firstError[0]).Trim()
+                        }
+                        else {
+                            '{0} script exited with code {1}.' -f $nativeTransportName, $exitCode
+                        }
+                    }
+
+                    if ($CaptureOutput) {
+                        $artifact = Write-WinPushCommandOutputArtifact `
+                            -OutputRoot $OutputRoot `
+                            -ComputerName $target `
+                            -Output $output `
+                            -Errors $errors `
+                            -RunDirectory $sharedRunDirectory `
+                            -Operation 'RunScript' `
+                            -Transport $Transport `
+                            -Succeeded $succeeded `
+                            -ExitCode $exitCode `
+                            -ErrorMessage $errorMessage
+                        $sharedRunDirectory = $artifact.RunDirectory
+                        $runDirectory = $artifact.RunDirectory
+                        $computerDirectory = $artifact.ComputerDirectory
+                        $resultPath = $artifact.ResultPath
+                        $stdOutPath = $artifact.StdOutPath
+                        $stdErrPath = $artifact.StdErrPath
+                    }
+
+                    New-WinPushExecutionResult `
+                        -ComputerName $target `
+                        -Transport $Transport `
+                        -Operation 'RunScript' `
+                        -Succeeded $succeeded `
+                        -ExitCode $exitCode `
+                        -ErrorMessage $errorMessage `
+                        -Output $output `
+                        -Errors $errors `
+                        -RunDirectory $runDirectory `
+                        -ComputerDirectory $computerDirectory `
+                        -ResultPath $resultPath `
+                        -StdOutPath $stdOutPath `
+                        -StdErrPath $stdErrPath
+                }
+                catch {
+                    $errorMessage = $_.Exception.Message
+
+                    if ($CaptureOutput) {
+                        $artifact = Write-WinPushCommandOutputArtifact `
+                            -OutputRoot $OutputRoot `
+                            -ComputerName $target `
+                            -Errors $errorMessage `
+                            -RunDirectory $sharedRunDirectory `
+                            -Operation 'RunScript' `
+                            -Transport $Transport `
+                            -Succeeded $false `
+                            -ExitCode 1 `
+                            -ErrorMessage $errorMessage
+                        $sharedRunDirectory = $artifact.RunDirectory
+                        $runDirectory = $artifact.RunDirectory
+                        $computerDirectory = $artifact.ComputerDirectory
+                        $resultPath = $artifact.ResultPath
+                        $stdOutPath = $artifact.StdOutPath
+                        $stdErrPath = $artifact.StdErrPath
+                    }
+
+                    New-WinPushExecutionResult `
+                        -ComputerName $target `
+                        -Transport $Transport `
+                        -Operation 'RunScript' `
+                        -Succeeded $false `
+                        -ExitCode 1 `
+                        -ErrorMessage $errorMessage `
+                        -Errors $errorMessage `
+                        -RunDirectory $runDirectory `
+                        -ComputerDirectory $computerDirectory `
+                        -ResultPath $resultPath `
+                        -StdOutPath $stdOutPath `
+                        -StdErrPath $stdErrPath
+                }
+
+                continue
             }
 
             try {

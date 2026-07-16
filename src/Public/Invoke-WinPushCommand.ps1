@@ -64,10 +64,6 @@ function Invoke-WinPushCommand {
                 throw [System.NotSupportedException]::new(('Credential is not supported when Transport is {0}.' -f $Transport))
             }
 
-            if ($CaptureOutput) {
-                throw [System.NotSupportedException]::new(('CaptureOutput is not supported when Transport is {0}.' -f $Transport))
-            }
-
             if ($Logs) {
                 throw [System.NotSupportedException]::new(('Logs is not supported when Transport is {0}.' -f $Transport))
             }
@@ -101,6 +97,7 @@ function Invoke-WinPushCommand {
                     else {
                         Invoke-WinPushPsExecCommand -ComputerName $target -Command $Command -PsExecPath $PsExecPath
                     }
+
                     $exitCode = $commandResult.ExitCode
                     $output = @($commandResult.Output)
                     $errors = @($commandResult.Errors)
@@ -119,6 +116,26 @@ function Invoke-WinPushCommand {
                         }
                     }
 
+                    if ($CaptureOutput) {
+                        $artifact = Write-WinPushCommandOutputArtifact `
+                            -OutputRoot $OutputRoot `
+                            -ComputerName $target `
+                            -Output $output `
+                            -Errors $errors `
+                            -RunDirectory $sharedRunDirectory `
+                            -Operation 'RunCommand' `
+                            -Transport $Transport `
+                            -Succeeded $succeeded `
+                            -ExitCode $exitCode `
+                            -ErrorMessage $errorMessage
+                        $sharedRunDirectory = $artifact.RunDirectory
+                        $runDirectory = $artifact.RunDirectory
+                        $computerDirectory = $artifact.ComputerDirectory
+                        $resultPath = $artifact.ResultPath
+                        $stdOutPath = $artifact.StdOutPath
+                        $stdErrPath = $artifact.StdErrPath
+                    }
+
                     New-WinPushExecutionResult `
                         -ComputerName $target `
                         -Transport $Transport `
@@ -127,17 +144,48 @@ function Invoke-WinPushCommand {
                         -ExitCode $exitCode `
                         -ErrorMessage $errorMessage `
                         -Output $output `
-                        -Errors $errors
+                        -Errors $errors `
+                        -RunDirectory $runDirectory `
+                        -ComputerDirectory $computerDirectory `
+                        -ResultPath $resultPath `
+                        -StdOutPath $stdOutPath `
+                        -StdErrPath $stdErrPath
                 }
                 catch {
+                    $errorMessage = $_.Exception.Message
+
+                    if ($CaptureOutput) {
+                        $artifact = Write-WinPushCommandOutputArtifact `
+                            -OutputRoot $OutputRoot `
+                            -ComputerName $target `
+                            -Errors $errorMessage `
+                            -RunDirectory $sharedRunDirectory `
+                            -Operation 'RunCommand' `
+                            -Transport $Transport `
+                            -Succeeded $false `
+                            -ExitCode 1 `
+                            -ErrorMessage $errorMessage
+                        $sharedRunDirectory = $artifact.RunDirectory
+                        $runDirectory = $artifact.RunDirectory
+                        $computerDirectory = $artifact.ComputerDirectory
+                        $resultPath = $artifact.ResultPath
+                        $stdOutPath = $artifact.StdOutPath
+                        $stdErrPath = $artifact.StdErrPath
+                    }
+
                     New-WinPushExecutionResult `
                         -ComputerName $target `
                         -Transport $Transport `
                         -Operation 'RunCommand' `
                         -Succeeded $false `
                         -ExitCode 1 `
-                        -ErrorMessage $_.Exception.Message `
-                        -Errors $_.Exception.Message
+                        -ErrorMessage $errorMessage `
+                        -Errors $errorMessage `
+                        -RunDirectory $runDirectory `
+                        -ComputerDirectory $computerDirectory `
+                        -ResultPath $resultPath `
+                        -StdOutPath $stdOutPath `
+                        -StdErrPath $stdErrPath
                 }
 
                 continue

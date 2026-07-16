@@ -145,7 +145,7 @@ ErrorMessage  :
 | --- | --- |
 | `Test-WinPushTarget` | Tests whether one or more targets can create PSRP sessions. |
 | `Invoke-WinPushCommand` | Runs command text on one or more targets through PSRP, WinRS, or PsExec. |
-| `Invoke-WinPushScript` | Runs an existing local `.ps1` file on one or more targets through PSRP. |
+| `Invoke-WinPushScript` | Runs an existing local `.ps1` file on one or more targets through PSRP, WinRS, or PsExec. |
 | `Copy-WinPushItem` | Uploads or downloads one file through PSRP. |
 | `Get-WinPushLog` | Copies immediate files from an explicit remote log directory. |
 
@@ -185,6 +185,15 @@ Run a local script:
 Invoke-WinPushScript `
     -ComputerName PC01 `
     -ScriptPath .\Install-EA.ps1
+```
+
+Run a local script through WinRS:
+
+```powershell
+Invoke-WinPushScript `
+    -ComputerName PC01 `
+    -ScriptPath .\Install-EA.ps1 `
+    -Transport WinRM
 ```
 
 Copy a file to a target:
@@ -242,7 +251,7 @@ This module does not write generated runtime output back into the repository.
 - current Windows identity or supplied `PSCredential` authorized on the target
 - Azure DevOps feed read access when installing from `SCFModules`
 - target-side permissions for the requested command, script, file copy, or log retrieval operation
-- PsExec available locally when using `Invoke-WinPushCommand -Transport PsExec`
+- PsExec available locally when using `-Transport PsExec`
 
 ## Testing
 

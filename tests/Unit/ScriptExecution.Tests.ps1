@@ -3,6 +3,10 @@ $script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Privat
 $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushExecutionResult.ps1'
 $script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushLogResult.ps1'
 $script:ArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
+$script:NativeProcessPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushNativeProcess.ps1'
+$script:NativeScriptCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\New-WinPushNativeScriptCommand.ps1'
+$script:WinRsCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushWinRsCommand.ps1'
+$script:PsExecCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushPsExecCommand.ps1'
 $script:PsrpScriptPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushPsrpScript.ps1'
 $script:ScriptLogDirectoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\Get-WinPushScriptLogDirectory.ps1'
 $script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\New-WinPushLogArtifactDirectory.ps1'
@@ -13,6 +17,10 @@ $script:ScriptCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\P
 . $script:ResultFactoryPath
 . $script:LogResultFactoryPath
 . $script:ArtifactPath
+. $script:NativeProcessPath
+. $script:NativeScriptCommandPath
+. $script:WinRsCommandPath
+. $script:PsExecCommandPath
 . $script:PsrpScriptPath
 . $script:ScriptLogDirectoryPath
 . $script:LogArtifactPath
@@ -64,6 +72,16 @@ Describe 'Invoke-WinPushScript' {
         $script:LogCopyError = $null
         $script:LogCopyReturnedLogs = $null
         $script:LogCopyReturnedCopiedLogPaths = $null
+        $script:NativeProcessFilePaths = @()
+        $script:NativeProcessArgumentLists = @()
+        $script:NativeProcessError = $null
+        $script:NativeProcessExitCode = 0
+        $script:NativeProcessStandardOutput = "native script output`r`n"
+        $script:NativeProcessStandardError = ''
+        $script:NativeProcessErrorsByComputerName = @{}
+        $script:NativeProcessExitCodesByComputerName = @{}
+        $script:NativeProcessStandardOutputsByComputerName = @{}
+        $script:NativeProcessStandardErrorsByComputerName = @{}
         $script:FixtureScript = Join-Path -Path $TestDrive -ChildPath 'Invoke-WinPushScript-Fixture.ps1'
         Set-Content -LiteralPath $script:FixtureScript -Value 'Write-Output "script output"' -Encoding utf8NoBOM
     }
@@ -208,6 +226,57 @@ Describe 'Invoke-WinPushScript' {
         }
     }
 
+    Mock Invoke-WinPushNativeProcess {
+        param(
+            [string] $FilePath,
+            [string[]] $ArgumentList
+        )
+
+        $script:NativeProcessFilePaths += $FilePath
+        $script:NativeProcessArgumentLists += , @($ArgumentList)
+        $computerName = if ($ArgumentList.Count -gt 0 -and $ArgumentList[0] -like '-r:*') {
+            $ArgumentList[0].Substring(3)
+        }
+        elseif ($ArgumentList.Count -gt 0 -and $ArgumentList[0] -like '\\*') {
+            $ArgumentList[0].Substring(2)
+        }
+        else {
+            ''
+        }
+
+        if ($null -ne $script:NativeProcessError) {
+            throw $script:NativeProcessError
+        }
+
+        if ($script:NativeProcessErrorsByComputerName.ContainsKey($computerName)) {
+            throw $script:NativeProcessErrorsByComputerName[$computerName]
+        }
+
+        $exitCode = $script:NativeProcessExitCode
+        if ($script:NativeProcessExitCodesByComputerName.ContainsKey($computerName)) {
+            $exitCode = $script:NativeProcessExitCodesByComputerName[$computerName]
+        }
+
+        $standardOutput = $script:NativeProcessStandardOutput
+        if ($script:NativeProcessStandardOutputsByComputerName.ContainsKey($computerName)) {
+            $standardOutput = $script:NativeProcessStandardOutputsByComputerName[$computerName]
+        }
+
+        $standardError = $script:NativeProcessStandardError
+        if ($script:NativeProcessStandardErrorsByComputerName.ContainsKey($computerName)) {
+            $standardError = $script:NativeProcessStandardErrorsByComputerName[$computerName]
+        }
+
+        [pscustomobject] [ordered] @{
+            PSTypeName      = 'WinPush.NativeProcessResult'
+            FilePath        = $FilePath
+            ArgumentList    = @($ArgumentList)
+            ExitCode        = $exitCode
+            StandardOutput  = $standardOutput
+            StandardError   = $standardError
+        }
+    }
+
     Mock Remove-PSSession {
         $script:RemovedSessionIds += $Id
     }
@@ -245,6 +314,23 @@ Describe 'Invoke-WinPushScript' {
 
         ($command.Parameters.Keys -contains 'Credential') | Should Be $true
         $command.Parameters['Credential'].ParameterType.FullName | Should Be 'System.Management.Automation.PSCredential'
+    }
+
+    It 'has an optional transport parameter with PSRP as the default' {
+        $command = Get-Command -Name Invoke-WinPushScript
+
+        ($command.Parameters.Keys -contains 'Transport') | Should Be $true
+        $command.Parameters['Transport'].ParameterType.FullName | Should Be 'System.String'
+        $validateSet = @($command.Parameters['Transport'].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] })
+        @($validateSet).Count | Should Be 1
+        ($validateSet[0].ValidValues -join ',') | Should Be 'Psrp,WinRM,PsExec'
+        ($command.Parameters.Keys -contains 'PsExecPath') | Should Be $true
+        $command.Parameters['PsExecPath'].ParameterType.FullName | Should Be 'System.String'
+
+        Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript | Out-Null
+
+        @($script:NewPSSessionComputerNames).Count | Should Be 1
+        @($script:NativeProcessFilePaths).Count | Should Be 0
     }
 
     It 'has optional script-attached log collection without arbitrary log directory passthrough' {
@@ -888,6 +974,121 @@ Describe 'Invoke-WinPushScript' {
         $result.Errors[1] | Should Be 'second error'
         (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'first output,second output'
         (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'first error,second error'
+    }
+
+    It 'runs one script through WinRM transport using encoded local script content' {
+        $script:NativeProcessStandardOutput = "winrm script output`r`n"
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM
+
+        $result.Transport | Should Be 'WinRM'
+        $result.Operation | Should Be 'RunScript'
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        $result.Output[0] | Should Be 'winrm script output'
+        @($script:NativeProcessFilePaths).Count | Should Be 1
+        $script:NativeProcessFilePaths[0] | Should Be 'winrs.exe'
+        @($script:NativeProcessArgumentLists[0]).Count | Should Be 2
+        $script:NativeProcessArgumentLists[0][0] | Should Be '-r:PC-001'
+        $script:NativeProcessArgumentLists[0][1] | Should Match ([regex]::Escape('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand '))
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'runs one script through PsExec transport using encoded local script content' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-script.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $resolvedPsExecPath = (Get-Item -LiteralPath $psExecPath).FullName
+        $script:NativeProcessStandardOutput = "psexec script output`r`n"
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport PsExec -PsExecPath $psExecPath
+
+        $result.Transport | Should Be 'PsExec'
+        $result.Operation | Should Be 'RunScript'
+        $result.Succeeded | Should Be $true
+        $result.Output[0] | Should Be 'psexec script output'
+        @($script:NativeProcessFilePaths).Count | Should Be 1
+        $script:NativeProcessFilePaths[0] | Should Be $resolvedPsExecPath
+        @($script:NativeProcessArgumentLists[0]).Count | Should Be 6
+        $script:NativeProcessArgumentLists[0][0] | Should Be '\\PC-001'
+        $script:NativeProcessArgumentLists[0][1] | Should Be 'cmd.exe'
+        $script:NativeProcessArgumentLists[0][2] | Should Be '/d'
+        $script:NativeProcessArgumentLists[0][3] | Should Be '/s'
+        $script:NativeProcessArgumentLists[0][4] | Should Be '/c'
+        $script:NativeProcessArgumentLists[0][5] | Should Match ([regex]::Escape('powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand '))
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'captures WinRM script output to artifact files when requested' {
+        $script:NativeProcessStandardOutput = "native script output`r`n"
+        $script:NativeProcessStandardError = "native script warning`r`n"
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM -CaptureOutput -OutputRoot $outputRoot
+
+        $result.Transport | Should Be 'WinRM'
+        $result.Succeeded | Should Be $true
+        $result.RunDirectory.StartsWith($outputRoot) | Should Be $true
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt')
+        $result.StdOutPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt')
+        $result.StdErrPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt')
+        (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'native script output'
+        (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'native script warning'
+        $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'))
+        @($summaryRows).Count | Should Be 1
+        $summaryRows[0].Operation | Should Be 'RunScript'
+        $summaryRows[0].Transport | Should Be 'WinRM'
+    }
+
+    It 'captures PsExec script output to artifact files when requested' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-script-capture.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $script:NativeProcessStandardOutput = "psexec script output`r`n"
+        $script:NativeProcessStandardError = "psexec script warning`r`n"
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport PsExec -PsExecPath $psExecPath -CaptureOutput -OutputRoot $outputRoot
+
+        $result.Transport | Should Be 'PsExec'
+        $result.Succeeded | Should Be $true
+        $result.RunDirectory.StartsWith($outputRoot) | Should Be $true
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt')
+        $result.StdOutPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt')
+        $result.StdErrPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt')
+        (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'psexec script output'
+        (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'psexec script warning'
+        $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'))
+        @($summaryRows).Count | Should Be 1
+        $summaryRows[0].Operation | Should Be 'RunScript'
+        $summaryRows[0].Transport | Should Be 'PsExec'
+    }
+
+    It 'rejects native script credentials before launching a native process' {
+        $credential = New-TestCredential -Secret 'Distinctive-native-script-secret!'
+
+        { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM -Credential $credential } |
+            Should Throw 'Credential is not supported when Transport is WinRM.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects native script attached logs before launching a native process' {
+        { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM -Logs -OutputRoot $TestDrive } |
+            Should Throw 'Logs is not supported when Transport is WinRM.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects PsExecPath when the PsExec script transport is not selected' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-wrong-transport.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+
+        { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -PsExecPath $psExecPath } |
+            Should Throw 'PsExecPath is only supported when Transport is PsExec.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
     It 'rejects a missing script path before opening a session' {
