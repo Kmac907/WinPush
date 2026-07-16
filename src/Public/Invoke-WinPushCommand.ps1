@@ -37,14 +37,9 @@ function Invoke-WinPushCommand {
 
         $remoteLogDirectory = if ($Logs) { Get-WinPushCommandLogDirectory -Command $Command } else { $null }
         $computerNames = [System.Collections.Generic.List[string]]::new()
-        $pipelineInputReceived = $false
     }
 
     process {
-        if ($MyInvocation.ExpectingInput) {
-            $pipelineInputReceived = $true
-        }
-
         if ($PSCmdlet.ParameterSetName -eq 'ComputerName') {
             foreach ($target in @($ComputerName)) {
                 $computerNames.Add($target)
@@ -75,20 +70,6 @@ function Invoke-WinPushCommand {
 
             if ($Logs) {
                 throw [System.NotSupportedException]::new(('Logs is not supported when Transport is {0}.' -f $Transport))
-            }
-        }
-
-        if ($Transport -eq 'PsExec') {
-            if ($PSCmdlet.ParameterSetName -eq 'HostFile') {
-                throw [System.NotSupportedException]::new('HostFile is not supported when Transport is PsExec.')
-            }
-
-            if ($pipelineInputReceived) {
-                throw [System.NotSupportedException]::new('Pipeline targets are not supported when Transport is PsExec.')
-            }
-
-            if ($targets.Count -ne 1) {
-                throw [System.NotSupportedException]::new('Transport PsExec supports exactly one target.')
             }
         }
 

@@ -1166,37 +1166,112 @@ Describe 'Invoke-WinPushCommand' {
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
-    It 'rejects PsExec host files before launching a native process' {
+    It 'runs PsExec direct-array targets sequentially through independent native processes' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-multiple.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $script:NativeProcessExitCodesByComputerName = @{
+            'PC-002' = 9
+        }
+        $script:NativeProcessStandardOutputsByComputerName = @{
+            'PC-001' = "first target`r`n"
+            'PC-002' = "second target`r`n"
+            'PC-003' = "third target`r`n"
+        }
+        $script:NativeProcessStandardErrorsByComputerName = @{
+            'PC-002' = "target two failed`r`n"
+        }
+
+        $results = @(Invoke-WinPushCommand -ComputerName @('PC-001', 'PC-002', 'PC-003', 'pc-001') -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath)
+
+        @($results).Count | Should Be 3
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[0].Transport | Should Be 'PsExec'
+        $results[0].Succeeded | Should Be $true
+        $results[0].ExitCode | Should Be 0
+        $results[0].Output[0] | Should Be 'first target'
+        $results[1].ComputerName | Should Be 'PC-002'
+        $results[1].Transport | Should Be 'PsExec'
+        $results[1].Succeeded | Should Be $false
+        $results[1].ExitCode | Should Be 9
+        $results[1].Output[0] | Should Be 'second target'
+        $results[1].Errors[0] | Should Be 'target two failed'
+        $results[1].ErrorMessage | Should Be 'target two failed'
+        $results[2].ComputerName | Should Be 'PC-003'
+        $results[2].Transport | Should Be 'PsExec'
+        $results[2].Succeeded | Should Be $true
+        $results[2].ExitCode | Should Be 0
+        $results[2].Output[0] | Should Be 'third target'
+        @($script:NativeProcessFilePaths).Count | Should Be 3
+        Split-Path -Path $script:NativeProcessFilePaths[0] -Leaf | Should Be 'PsExec-multiple.exe'
+        Split-Path -Path $script:NativeProcessFilePaths[1] -Leaf | Should Be 'PsExec-multiple.exe'
+        Split-Path -Path $script:NativeProcessFilePaths[2] -Leaf | Should Be 'PsExec-multiple.exe'
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be '\\PC-002|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[2] -join '|') | Should Be '\\PC-003|cmd.exe|/d|/s|/c|hostname'
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
+    It 'continues PsExec pipeline targets after one native process launch failure' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-pipeline.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $script:NativeProcessErrorsByComputerName = @{
+            'PC-001' = 'launch failed'
+        }
+        $script:NativeProcessStandardOutputsByComputerName = @{
+            'PC-002' = "later target`r`n"
+        }
+
+        $results = @(
+            @(
+                [pscustomobject] @{ ComputerName = 'PC-001' }
+                [pscustomobject] @{ ComputerName = 'PC-002' }
+            ) | Invoke-WinPushCommand -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath
+        )
+
+        @($results).Count | Should Be 2
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[0].Transport | Should Be 'PsExec'
+        $results[0].Succeeded | Should Be $false
+        $results[0].ExitCode | Should Be 1
+        $results[0].ErrorMessage | Should Be 'launch failed'
+        $results[1].ComputerName | Should Be 'PC-002'
+        $results[1].Transport | Should Be 'PsExec'
+        $results[1].Succeeded | Should Be $true
+        $results[1].Output[0] | Should Be 'later target'
+        @($script:NativeProcessFilePaths).Count | Should Be 2
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be '\\PC-002|cmd.exe|/d|/s|/c|hostname'
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'runs PsExec host-file targets through the shared resolver in order' {
         $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-hostfile.exe'
         Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
         $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'valid-hosts.txt'
+        $utf8Target = 'pc-utf8-{0}01' -f [char] 0x00e9
+        $script:NativeProcessStandardOutputsByComputerName = @{
+            'PC-001'    = "first target`r`n"
+            $utf8Target = "utf8 target`r`n"
+            'PC-003'    = "third target`r`n"
+        }
 
-        { Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath } |
-            Should Throw 'HostFile is not supported when Transport is PsExec.'
+        $results = @(Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath)
 
-        @($script:NativeProcessFilePaths).Count | Should Be 0
-        @($script:NewPSSessionComputerNames).Count | Should Be 0
-    }
-
-    It 'rejects PsExec pipeline targets before launching a native process' {
-        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-pipeline.exe'
-        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
-
-        { 'PC-001' | Invoke-WinPushCommand -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath } |
-            Should Throw 'Pipeline targets are not supported when Transport is PsExec.'
-
-        @($script:NativeProcessFilePaths).Count | Should Be 0
-        @($script:NewPSSessionComputerNames).Count | Should Be 0
-    }
-
-    It 'rejects multiple PsExec targets before launching a native process' {
-        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-multiple.exe'
-        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
-
-        { Invoke-WinPushCommand -ComputerName @('PC-001', 'PC-002') -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath } |
-            Should Throw 'Transport PsExec supports exactly one target.'
-
-        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($results).Count | Should Be 3
+        $results[0].ComputerName | Should Be 'PC-001'
+        $results[1].ComputerName | Should Be $utf8Target
+        $results[2].ComputerName | Should Be 'PC-003'
+        $results[0].Transport | Should Be 'PsExec'
+        $results[1].Transport | Should Be 'PsExec'
+        $results[2].Transport | Should Be 'PsExec'
+        $results[0].Output[0] | Should Be 'first target'
+        $results[1].Output[0] | Should Be 'utf8 target'
+        $results[2].Output[0] | Should Be 'third target'
+        @($script:NativeProcessFilePaths).Count | Should Be 3
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|cmd.exe|/d|/s|/c|hostname'
+        ($script:NativeProcessArgumentLists[1] -join '|') | Should Be ('\\{0}|cmd.exe|/d|/s|/c|hostname' -f $utf8Target)
+        ($script:NativeProcessArgumentLists[2] -join '|') | Should Be '\\PC-003|cmd.exe|/d|/s|/c|hostname'
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
