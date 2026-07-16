@@ -25,6 +25,9 @@
               <ListItem>
                 <PropertyName>ErrorMessage</PropertyName>
               </ListItem>
+              <ListItem>
+                <PropertyName>Output</PropertyName>
+              </ListItem>
             </ListItems>
           </ListEntry>
         </ListEntries>

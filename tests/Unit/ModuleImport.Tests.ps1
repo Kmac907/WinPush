@@ -35,7 +35,7 @@ Describe 'WinPush module import foundation' {
         }
     }
 
-    It 'formats execution results as a readable status list without raw output' {
+    It 'formats execution results as a readable status list with command output' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
 
@@ -65,11 +65,11 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'Succeeded'
         $formatted | Should Match 'ExitCode'
         $formatted | Should Match 'ErrorMessage'
+        $formatted | Should Match 'Output'
         $formatted | Should Match 'PC01'
         $formatted | Should Match 'RunCommand'
+        $formatted | Should Match 'raw remote output'
         $formatted | Should Not Match 'Transport'
-        $formatted | Should Not Match 'Output'
-        $formatted | Should Not Match 'raw remote output'
     }
 
     It 'does not truncate long execution error messages in the default view' {
