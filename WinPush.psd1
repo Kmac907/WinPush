@@ -19,6 +19,7 @@
     CmdletsToExport      = @()
     VariablesToExport    = @()
     AliasesToExport      = @()
+    FormatsToProcess     = @('WinPush.format.ps1xml')
 
     PrivateData          = @{
         PSData = @{

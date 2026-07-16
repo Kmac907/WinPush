@@ -17,6 +17,50 @@ Describe 'WinPush module import foundation' {
         ($manifest.CompatiblePSEditions -join ',') | Should Be 'Core'
     }
 
+    It 'registers the execution result status table format' {
+        $manifest = Import-PowerShellDataFile -LiteralPath $script:ManifestPath
+
+        ($manifest.FormatsToProcess -join ',') | Should Be 'WinPush.format.ps1xml'
+        Test-Path -LiteralPath (Join-Path -Path $script:ModuleRoot -ChildPath 'WinPush.format.ps1xml') | Should Be $true
+    }
+
+    It 'formats execution results as a concise status table without raw output' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $result = [pscustomobject] [ordered] @{
+            PSTypeName        = 'WinPush.ExecutionResult'
+            ComputerName      = 'PC01'
+            Transport         = 'Psrp'
+            Operation         = 'RunCommand'
+            Succeeded         = $true
+            ExitCode          = 0
+            ErrorMessage      = $null
+            Output            = @('raw remote output')
+            Errors            = @()
+            Logs              = @()
+            RunDirectory      = $null
+            ComputerDirectory = $null
+            ResultPath        = $null
+            StdOutPath        = $null
+            StdErrPath        = $null
+            CopiedLogPaths    = @()
+        }
+
+        $formatted = $result | Out-String
+
+        $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Operation'
+        $formatted | Should Match 'Succeeded'
+        $formatted | Should Match 'ExitCode'
+        $formatted | Should Match 'ErrorMessage'
+        $formatted | Should Match 'PC01'
+        $formatted | Should Match 'RunCommand'
+        $formatted | Should Not Match 'Transport'
+        $formatted | Should Not Match 'Output'
+        $formatted | Should Not Match 'raw remote output'
+    }
+
     It 'keeps transport implementation out of the root module' {
         $rootModule = Get-Content -Raw -LiteralPath (Join-Path -Path $script:ModuleRoot -ChildPath 'WinPush.psm1')
 
