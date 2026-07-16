@@ -5,6 +5,7 @@ $script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'sr
 $script:ArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
 $script:NativeProcessPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushNativeProcess.ps1'
 $script:WinRsCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushWinRsCommand.ps1'
+$script:PsExecCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushPsExecCommand.ps1'
 $script:PsrpCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushPsrpCommand.ps1'
 $script:CommandLogDirectoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\Get-WinPushCommandLogDirectory.ps1'
 $script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\New-WinPushLogArtifactDirectory.ps1'
@@ -18,6 +19,7 @@ $script:FixtureRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -
 . $script:ArtifactPath
 . $script:NativeProcessPath
 . $script:WinRsCommandPath
+. $script:PsExecCommandPath
 . $script:PsrpCommandPath
 . $script:CommandLogDirectoryPath
 . $script:LogArtifactPath
@@ -234,6 +236,9 @@ Describe 'Invoke-WinPushCommand' {
         $computerName = if ($ArgumentList.Count -gt 0 -and $ArgumentList[0] -like '-r:*') {
             $ArgumentList[0].Substring(3)
         }
+        elseif ($ArgumentList.Count -gt 0 -and $ArgumentList[0] -like '\\*') {
+            $ArgumentList[0].Substring(2)
+        }
         else {
             ''
         }
@@ -355,7 +360,9 @@ Describe 'Invoke-WinPushCommand' {
         $command.Parameters['Transport'].ParameterType.FullName | Should Be 'System.String'
         $validateSet = @($command.Parameters['Transport'].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] })
         @($validateSet).Count | Should Be 1
-        ($validateSet[0].ValidValues -join ',') | Should Be 'Psrp,WinRM'
+        ($validateSet[0].ValidValues -join ',') | Should Be 'Psrp,WinRM,PsExec'
+        ($command.Parameters.Keys -contains 'PsExecPath') | Should Be $true
+        $command.Parameters['PsExecPath'].ParameterType.FullName | Should Be 'System.String'
 
         Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' | Out-Null
 
@@ -1037,6 +1044,171 @@ Describe 'Invoke-WinPushCommand' {
         ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '-r:PC-001|hostname'
         @($script:NewPSSessionComputerNames).Count | Should Be 0
         @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
+    It 'runs one PsExec command through an explicit executable path' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-explicit.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $resolvedPsExecPath = (Get-Item -LiteralPath $psExecPath).FullName
+        $script:NativeProcessStandardOutput = "psexec output`r`n"
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath
+
+        $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
+        $result.ComputerName | Should Be 'PC-001'
+        $result.Transport | Should Be 'PsExec'
+        $result.Operation | Should Be 'RunCommand'
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        @($result.Output).Count | Should Be 1
+        $result.Output[0] | Should Be 'psexec output'
+        @($result.Errors).Count | Should Be 0
+        @($script:NativeProcessFilePaths).Count | Should Be 1
+        $script:NativeProcessFilePaths[0] | Should Be $resolvedPsExecPath
+        ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|hostname'
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
+    It 'discovers PsExec.exe from PATH when no explicit path is supplied' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $originalPath = $env:PATH
+
+        try {
+            $env:PATH = ('{0};{1}' -f $TestDrive, $originalPath)
+            $discoveredPsExecPath = (Get-Command -Name 'PsExec.exe' -CommandType Application).Source
+
+            Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec | Out-Null
+
+            @($script:NativeProcessFilePaths).Count | Should Be 1
+            $script:NativeProcessFilePaths[0] | Should Be $discoveredPsExecPath
+            ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|hostname'
+            @($script:NewPSSessionComputerNames).Count | Should Be 0
+        }
+        finally {
+            $env:PATH = $originalPath
+        }
+    }
+
+    It 'rejects a missing PsExec executable before launching a native process' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'MissingPsExec-missing.exe'
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath
+
+        $result.Succeeded | Should Be $false
+        $result.Transport | Should Be 'PsExec'
+        $result.ErrorMessage | Should Match 'PsExec executable was not found:'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects a directory PsExec path before launching a native process' {
+        $psExecDirectory = Join-Path -Path $TestDrive -ChildPath 'PsExec-directory.exe'
+        New-Item -Path $psExecDirectory -ItemType Directory | Out-Null
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecDirectory
+
+        $result.Succeeded | Should Be $false
+        $result.Transport | Should Be 'PsExec'
+        $result.ErrorMessage | Should Match 'PsExec path must be a file:'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects a non-exe PsExec path before launching a native process' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-non-exe.txt'
+        Set-Content -LiteralPath $psExecPath -Value 'not an exe'
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath
+
+        $result.Succeeded | Should Be $false
+        $result.Transport | Should Be 'PsExec'
+        $result.ErrorMessage | Should Match 'PsExec path must reference an .exe file:'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects PsExec credentials before launching a native process' {
+        $credential = New-TestCredential -Secret 'Distinctive-10.1-Credential-Secret!'
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-credential.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+
+        { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath -Credential $credential } |
+            Should Throw 'Credential is not supported when Transport is PsExec.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects PsExec capture-output artifacts before launching a native process' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-capture.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+
+        { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath -CaptureOutput -OutputRoot $TestDrive } |
+            Should Throw 'CaptureOutput is not supported when Transport is PsExec.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects PsExec attached logs before launching a native process' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-logs.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+
+        { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath -Logs -OutputRoot $TestDrive } |
+            Should Throw 'Logs is not supported when Transport is PsExec.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects PsExec host files before launching a native process' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-hostfile.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $hostFile = Join-Path -Path $script:FixtureRoot -ChildPath 'valid-hosts.txt'
+
+        { Invoke-WinPushCommand -HostFile $hostFile -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath } |
+            Should Throw 'HostFile is not supported when Transport is PsExec.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects PsExec pipeline targets before launching a native process' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-pipeline.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+
+        { 'PC-001' | Invoke-WinPushCommand -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath } |
+            Should Throw 'Pipeline targets are not supported when Transport is PsExec.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects multiple PsExec targets before launching a native process' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-multiple.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+
+        { Invoke-WinPushCommand -ComputerName @('PC-001', 'PC-002') -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath } |
+            Should Throw 'Transport PsExec supports exactly one target.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects PsExecPath when the PsExec transport is not selected' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-wrong-transport.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+
+        { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -PsExecPath $psExecPath } |
+            Should Throw 'PsExecPath is only supported when Transport is PsExec.'
+
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
     It 'keeps WinRS stdout and stderr in separate arrays when the native process fails' {

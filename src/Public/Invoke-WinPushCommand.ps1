@@ -11,8 +11,11 @@ function Invoke-WinPushCommand {
         [Parameter(Mandatory, Position = 1)]
         [string] $Command,
 
-        [ValidateSet('Psrp', 'WinRM')]
+        [ValidateSet('Psrp', 'WinRM', 'PsExec')]
         [string] $Transport = 'Psrp',
+
+        [AllowNull()]
+        [string] $PsExecPath,
 
         [System.Management.Automation.PSCredential] $Credential,
 
@@ -34,9 +37,14 @@ function Invoke-WinPushCommand {
 
         $remoteLogDirectory = if ($Logs) { Get-WinPushCommandLogDirectory -Command $Command } else { $null }
         $computerNames = [System.Collections.Generic.List[string]]::new()
+        $pipelineInputReceived = $false
     }
 
     process {
+        if ($MyInvocation.ExpectingInput) {
+            $pipelineInputReceived = $true
+        }
+
         if ($PSCmdlet.ParameterSetName -eq 'ComputerName') {
             foreach ($target in @($ComputerName)) {
                 $computerNames.Add($target)
@@ -52,17 +60,35 @@ function Invoke-WinPushCommand {
             $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
         }
 
-        if ($Transport -eq 'WinRM') {
+        if ($Transport -ne 'PsExec' -and $PSBoundParameters.ContainsKey('PsExecPath')) {
+            throw [System.NotSupportedException]::new('PsExecPath is only supported when Transport is PsExec.')
+        }
+
+        if ($Transport -eq 'WinRM' -or $Transport -eq 'PsExec') {
             if ($PSBoundParameters.ContainsKey('Credential')) {
-                throw [System.NotSupportedException]::new('Credential is not supported when Transport is WinRM.')
+                throw [System.NotSupportedException]::new(('Credential is not supported when Transport is {0}.' -f $Transport))
             }
 
             if ($CaptureOutput) {
-                throw [System.NotSupportedException]::new('CaptureOutput is not supported when Transport is WinRM.')
+                throw [System.NotSupportedException]::new(('CaptureOutput is not supported when Transport is {0}.' -f $Transport))
             }
 
             if ($Logs) {
-                throw [System.NotSupportedException]::new('Logs is not supported when Transport is WinRM.')
+                throw [System.NotSupportedException]::new(('Logs is not supported when Transport is {0}.' -f $Transport))
+            }
+        }
+
+        if ($Transport -eq 'PsExec') {
+            if ($PSCmdlet.ParameterSetName -eq 'HostFile') {
+                throw [System.NotSupportedException]::new('HostFile is not supported when Transport is PsExec.')
+            }
+
+            if ($pipelineInputReceived) {
+                throw [System.NotSupportedException]::new('Pipeline targets are not supported when Transport is PsExec.')
+            }
+
+            if ($targets.Count -ne 1) {
+                throw [System.NotSupportedException]::new('Transport PsExec supports exactly one target.')
             }
         }
 
@@ -86,13 +112,19 @@ function Invoke-WinPushCommand {
                 $sessionParameters['Credential'] = $Credential
             }
 
-            if ($Transport -eq 'WinRM') {
+            if ($Transport -eq 'WinRM' -or $Transport -eq 'PsExec') {
                 try {
-                    $commandResult = Invoke-WinPushWinRsCommand -ComputerName $target -Command $Command
+                    $commandResult = if ($Transport -eq 'WinRM') {
+                        Invoke-WinPushWinRsCommand -ComputerName $target -Command $Command
+                    }
+                    else {
+                        Invoke-WinPushPsExecCommand -ComputerName $target -Command $Command -PsExecPath $PsExecPath
+                    }
                     $exitCode = $commandResult.ExitCode
                     $output = @($commandResult.Output)
                     $errors = @($commandResult.Errors)
                     $succeeded = $exitCode -eq 0
+                    $nativeTransportName = if ($Transport -eq 'WinRM') { 'WinRS' } else { $Transport }
                     $errorMessage = if ($succeeded) {
                         $null
                     }
@@ -102,13 +134,13 @@ function Invoke-WinPushCommand {
                             ([string] $firstError[0]).Trim()
                         }
                         else {
-                            'WinRS command exited with code {0}.' -f $exitCode
+                            '{0} command exited with code {1}.' -f $nativeTransportName, $exitCode
                         }
                     }
 
                     New-WinPushExecutionResult `
                         -ComputerName $target `
-                        -Transport 'WinRM' `
+                        -Transport $Transport `
                         -Operation 'RunCommand' `
                         -Succeeded $succeeded `
                         -ExitCode $exitCode `
@@ -119,7 +151,7 @@ function Invoke-WinPushCommand {
                 catch {
                     New-WinPushExecutionResult `
                         -ComputerName $target `
-                        -Transport 'WinRM' `
+                        -Transport $Transport `
                         -Operation 'RunCommand' `
                         -Succeeded $false `
                         -ExitCode 1 `
