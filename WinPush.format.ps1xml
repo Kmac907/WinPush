@@ -9,6 +9,12 @@
       <ListControl>
         <ListEntries>
           <ListEntry>
+            <EntrySelectedBy>
+              <SelectionCondition>
+                <TypeName>WinPush.ExecutionResult</TypeName>
+                <ScriptBlock>$null -ne $_.StdOutPath -or $null -ne $_.StdErrPath</ScriptBlock>
+              </SelectionCondition>
+            </EntrySelectedBy>
             <ListItems>
               <ListItem>
                 <PropertyName>ComputerName</PropertyName>
@@ -23,10 +29,40 @@
                 <PropertyName>ExitCode</PropertyName>
               </ListItem>
               <ListItem>
+                <Label>OutputPreview</Label>
+                <ScriptBlock>$outputItems = @($_.Output); if ($outputItems.Count -gt 0) { [string] $outputItems[-1] }</ScriptBlock>
+              </ListItem>
+              <ListItem>
                 <PropertyName>ErrorMessage</PropertyName>
               </ListItem>
               <ListItem>
-                <PropertyName>Output</PropertyName>
+                <PropertyName>StdOutPath</PropertyName>
+              </ListItem>
+              <ListItem>
+                <PropertyName>StdErrPath</PropertyName>
+              </ListItem>
+            </ListItems>
+          </ListEntry>
+          <ListEntry>
+            <ListItems>
+              <ListItem>
+                <PropertyName>ComputerName</PropertyName>
+              </ListItem>
+              <ListItem>
+                <PropertyName>Operation</PropertyName>
+              </ListItem>
+              <ListItem>
+                <PropertyName>Succeeded</PropertyName>
+              </ListItem>
+              <ListItem>
+                <PropertyName>ExitCode</PropertyName>
+              </ListItem>
+              <ListItem>
+                <Label>OutputPreview</Label>
+                <ScriptBlock>$outputItems = @($_.Output); if ($outputItems.Count -gt 0) { [string] $outputItems[-1] }</ScriptBlock>
+              </ListItem>
+              <ListItem>
+                <PropertyName>ErrorMessage</PropertyName>
               </ListItem>
             </ListItems>
           </ListEntry>

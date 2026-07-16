@@ -35,7 +35,7 @@ Describe 'WinPush module import foundation' {
         }
     }
 
-    It 'formats execution results as a readable status list with command output' {
+    It 'formats uncaptured execution results as a readable status list with output preview' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
 
@@ -47,7 +47,7 @@ Describe 'WinPush module import foundation' {
             Succeeded         = $true
             ExitCode          = 0
             ErrorMessage      = $null
-            Output            = @('raw remote output')
+            Output            = @('first remote output', 'last remote output')
             Errors            = @()
             Logs              = @()
             RunDirectory      = $null
@@ -65,11 +65,55 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'Succeeded'
         $formatted | Should Match 'ExitCode'
         $formatted | Should Match 'ErrorMessage'
-        $formatted | Should Match 'Output'
+        $formatted | Should Match 'OutputPreview'
         $formatted | Should Match 'PC01'
         $formatted | Should Match 'RunCommand'
-        $formatted | Should Match 'raw remote output'
+        $formatted | Should Match 'last remote output'
+        $formatted | Should Not Match 'first remote output'
         $formatted | Should Not Match 'Transport'
+        $formatted | Should Not Match 'StdOutPath'
+        $formatted | Should Not Match 'StdErrPath'
+        $formatted | Should Not Match '^Output\s+:'
+    }
+
+    It 'formats captured execution results with output preview and artifact paths' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $result = [pscustomobject] [ordered] @{
+            PSTypeName        = 'WinPush.ExecutionResult'
+            ComputerName      = 'PC01'
+            Transport         = 'Psrp'
+            Operation         = 'RunCommand'
+            Succeeded         = $true
+            ExitCode          = 0
+            ErrorMessage      = $null
+            Output            = @('captured remote output')
+            Errors            = @()
+            Logs              = @()
+            RunDirectory      = 'C:\WinPush\20260716-100000'
+            ComputerDirectory = 'C:\WinPush\20260716-100000\PC01'
+            ResultPath        = 'C:\WinPush\20260716-100000\PC01\result.txt'
+            StdOutPath        = 'C:\WinPush\20260716-100000\PC01\stdout.txt'
+            StdErrPath        = 'C:\WinPush\20260716-100000\PC01\stderr.txt'
+            CopiedLogPaths    = @()
+        }
+
+        $formatted = $result | Out-String
+
+        $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Operation'
+        $formatted | Should Match 'Succeeded'
+        $formatted | Should Match 'ExitCode'
+        $formatted | Should Match 'OutputPreview'
+        $formatted | Should Match 'captured remote output'
+        $formatted | Should Match 'ErrorMessage'
+        $formatted | Should Match 'StdOutPath'
+        $formatted | Should Match 'stdout.txt'
+        $formatted | Should Match 'StdErrPath'
+        $formatted | Should Match 'stderr.txt'
+        $formatted | Should Not Match 'Transport'
+        $formatted | Should Not Match 'ComputerDirectory'
     }
 
     It 'does not truncate long execution error messages in the default view' {
