@@ -67,9 +67,9 @@ Additional cleanup:
 
 ## Package Workflow
 
-`Invoke-WinPushPackage` currently stages one existing local package file or directory from the admin workstation to one direct target through PSRP. It creates a remote staging directory under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It returns a `WinPush.ExecutionResult` with `Operation = RunPackage`.
+`Invoke-WinPushPackage` currently stages one existing local package file or directory from the admin workstation to one direct target through PSRP. It creates a remote staging directory under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It can also download one absolute URI package to the admin-workstation cache without opening an endpoint session. It returns a `WinPush.ExecutionResult` with `Operation = RunPackage`.
 
-Later package workflow slices add URI package download to the admin workstation cache, optional endpoint zip extraction, PowerShell entry-point execution, output capture, log/result copy, cleanup policy, multi-target target sources, and live package validation.
+Later package workflow slices add cached URI endpoint staging, optional endpoint zip extraction, PowerShell entry-point execution, output capture, log/result copy, cleanup policy, multi-target target sources, and live package validation.
 
 Package workflow results carry `PackageMetadata` on the returned `WinPush.ExecutionResult`. The metadata shape is:
 
@@ -116,14 +116,13 @@ Invoke-WinPushPackage `
     -Extract
 ```
 
-Planned remote package source downloaded by the admin workstation first:
+Current remote package source downloaded by the admin workstation first:
 
 ```powershell
 Invoke-WinPushPackage `
     -ComputerName PC01 `
     -Uri 'https://storage.blob.core.windows.net/packages/EA.zip' `
-    -EntryPoint .\Install-EA.ps1 `
-    -Extract
+    -EntryPoint .\Install-EA.ps1
 ```
 
 Planned package workflow with artifacts, logs, and cleanup:
@@ -139,7 +138,7 @@ Invoke-WinPushPackage `
     -Cleanup Always
 ```
 
-Planned defaults:
+Defaults:
 
 - URI packages download to `C:\WinPush\PackageCache\<run-timestamp>\` on the admin workstation before endpoint staging.
 - Endpoint staging uses `C:\ProgramData\WinPush\Staging\<run-id>\`.
@@ -150,8 +149,8 @@ Planned defaults:
 
 Current limitations:
 
-- Only local file and directory paths are staged.
-- URI packages are rejected.
+- Only local file and directory paths are staged to endpoints.
+- URI packages are downloaded to the admin-workstation cache but are not staged to endpoints yet.
 - `-Extract`, `-CaptureOutput`, `-Logs`, and cleanup policies other than `Never` are rejected.
 - `-HostFile`, pipeline target input, and multi-target package workflows are rejected until the target-source package slice is implemented.
 - The package entry point is recorded in metadata but not executed yet.

@@ -30,6 +30,66 @@ function New-WinPushPackageStagePlan {
     }
 }
 
+function New-WinPushPackageCachePlan {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [uri] $Uri,
+
+        [Parameter(Mandatory)]
+        [string] $PackageCacheRoot
+    )
+
+    if (-not $Uri.IsAbsoluteUri) {
+        throw [System.ArgumentException]::new('Uri must be an absolute package URI.')
+    }
+
+    if ([string]::IsNullOrWhiteSpace($PackageCacheRoot)) {
+        throw [System.ArgumentException]::new('PackageCacheRoot must not be empty.')
+    }
+
+    $fileName = [System.IO.Path]::GetFileName($Uri.AbsolutePath)
+    $fileName = [System.Uri]::UnescapeDataString($fileName)
+    if ([string]::IsNullOrWhiteSpace($fileName)) {
+        $fileName = 'package'
+    }
+
+    $invalidFileNamePattern = '[{0}]' -f ([regex]::Escape((-join [System.IO.Path]::GetInvalidFileNameChars())))
+    $safeFileName = [regex]::Replace($fileName, $invalidFileNamePattern, '_')
+    $cacheId = '{0}-{1}' -f ([datetime]::UtcNow.ToString('yyyyMMddHHmmssfff')), ([guid]::NewGuid().ToString('N').Substring(0, 8))
+    $trimmedCacheRoot = $PackageCacheRoot.TrimEnd('\')
+    $cacheDirectory = '{0}\{1}' -f $trimmedCacheRoot, $cacheId
+    $localPackagePath = '{0}\{1}' -f $cacheDirectory, $safeFileName
+
+    [pscustomobject] [ordered] @{
+        PSTypeName        = 'WinPush.PackageCachePlan'
+        CacheId           = $cacheId
+        CacheDirectory    = $cacheDirectory
+        LocalPackagePath  = $localPackagePath
+        PackageFileName   = $safeFileName
+        PackageSource     = $Uri.OriginalString
+    }
+}
+
+function Save-WinPushPackageUriToCache {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [uri] $Uri,
+
+        [Parameter(Mandatory)]
+        [object] $CachePlan
+    )
+
+    [System.IO.Directory]::CreateDirectory([string] $CachePlan.CacheDirectory) | Out-Null
+    Invoke-WebRequest `
+        -Uri $Uri `
+        -OutFile ([string] $CachePlan.LocalPackagePath) `
+        -ErrorAction Stop | Out-Null
+
+    [string] $CachePlan.LocalPackagePath
+}
+
 function Invoke-WinPushPsrpPackageStage {
     [CmdletBinding()]
     param(

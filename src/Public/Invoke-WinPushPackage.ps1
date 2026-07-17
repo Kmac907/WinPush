@@ -68,11 +68,7 @@ function Invoke-WinPushPackage {
     }
 
     end {
-        if ($PSCmdlet.ParameterSetName -like 'Uri*') {
-            throw [System.NotSupportedException]::new('Uri package sources are not supported until roadmap item 11.4.')
-        }
-
-        if ($PSCmdlet.ParameterSetName -eq 'PathHostFile') {
+        if ($PSCmdlet.ParameterSetName -eq 'PathHostFile' -or $PSCmdlet.ParameterSetName -eq 'UriHostFile') {
             throw [System.NotSupportedException]::new('HostFile package target input is not supported until roadmap item 11.11.')
         }
 
@@ -90,6 +86,62 @@ function Invoke-WinPushPackage {
 
         if ($Cleanup -ne 'Never') {
             throw [System.NotSupportedException]::new('Cleanup policies other than Never are not supported until roadmap item 11.10.')
+        }
+
+        if ($PSCmdlet.ParameterSetName -eq 'UriComputerName') {
+            $target = if ($computerNames.Count -eq 1) { $computerNames[0] } else { $null }
+            $cachePlan = $null
+
+            try {
+                $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
+                if ($targets.Count -ne 1) {
+                    throw [System.ArgumentException]::new('Invoke-WinPushPackage currently supports exactly one target until roadmap item 11.11.')
+                }
+
+                $target = $targets[0]
+                $cachePlan = New-WinPushPackageCachePlan -Uri $Uri -PackageCacheRoot $PackageCacheRoot
+                $localPackagePath = Save-WinPushPackageUriToCache -Uri $Uri -CachePlan $cachePlan
+
+                $metadata = New-WinPushPackageInfo `
+                    -PackageSourceType Uri `
+                    -PackageSource $Uri.OriginalString `
+                    -LocalPackagePath $localPackagePath `
+                    -EntryPoint $EntryPoint `
+                    -CleanupPolicy $Cleanup
+
+                New-WinPushExecutionResult `
+                    -ComputerName $target `
+                    -Transport 'Psrp' `
+                    -Operation 'RunPackage' `
+                    -Succeeded $true `
+                    -ExitCode 0 `
+                    -Output $metadata `
+                    -PackageMetadata $metadata
+            }
+            catch {
+                $metadata = $null
+                if ($null -ne $cachePlan) {
+                    $metadata = New-WinPushPackageInfo `
+                        -PackageSourceType Uri `
+                        -PackageSource $Uri.OriginalString `
+                        -LocalPackagePath $cachePlan.LocalPackagePath `
+                        -EntryPoint $EntryPoint `
+                        -CleanupPolicy $Cleanup
+                }
+
+                $resultComputerName = if ([string]::IsNullOrWhiteSpace($target)) { [string] $ComputerName } else { $target }
+                New-WinPushExecutionResult `
+                    -ComputerName $resultComputerName `
+                    -Transport 'Psrp' `
+                    -Operation 'RunPackage' `
+                    -Succeeded $false `
+                    -ExitCode 1 `
+                    -ErrorMessage $_.Exception.Message `
+                    -Errors $_.Exception.Message `
+                    -PackageMetadata $metadata
+            }
+
+            return
         }
 
         $target = if ($computerNames.Count -eq 1) { $computerNames[0] } else { $null }

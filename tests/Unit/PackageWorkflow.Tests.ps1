@@ -86,9 +86,9 @@ Describe 'Invoke-WinPushPackage contract' {
         $packagePath = Join-Path -Path $TestDrive -ChildPath 'Package.zip'
         Set-Content -LiteralPath $packagePath -Value 'package' -Encoding utf8NoBOM
 
-        { Invoke-WinPushPackage -ComputerName 'PC-001' -Uri 'https://storage.contoso.example/packages/EA.zip' -EntryPoint '.\Install-EA.ps1' } |
-            Should Throw 'Uri package sources are not supported until roadmap item 11.4.'
         { Invoke-WinPushPackage -HostFile '.\hosts.txt' -Path $packagePath -EntryPoint '.\Install-EA.ps1' } |
+            Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
+        { Invoke-WinPushPackage -HostFile '.\hosts.txt' -Uri 'https://storage.contoso.example/packages/EA.zip' -EntryPoint '.\Install-EA.ps1' } |
             Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
         { Invoke-WinPushPackage -ComputerName 'PC-001' -Path $packagePath -EntryPoint '.\Install-EA.ps1' -Extract } |
             Should Throw 'Extract is not supported until roadmap item 11.6.'
@@ -101,7 +101,7 @@ Describe 'Invoke-WinPushPackage contract' {
     }
 }
 
-Describe 'Invoke-WinPushPackage local path staging' {
+Describe 'Invoke-WinPushPackage local package preparation and staging' {
     BeforeEach {
         $script:NewPSSessionComputerNames = @()
         $script:NewPSSessionCredentialSupplied = @()
@@ -111,6 +111,8 @@ Describe 'Invoke-WinPushPackage local path staging' {
         $script:CopiedPaths = @()
         $script:CopiedDestinations = @()
         $script:CopiedDirections = @()
+        $script:DownloadUris = @()
+        $script:DownloadOutFiles = @()
         $script:RemovedSessionIds = @()
         $script:SessionToReturn = [System.Runtime.Serialization.FormatterServices]::GetUninitializedObject(
             [System.Management.Automation.Runspaces.PSSession]
@@ -118,6 +120,7 @@ Describe 'Invoke-WinPushPackage local path staging' {
         $script:NewPSSessionError = $null
         $script:RemoteDirectoryError = $null
         $script:CopyError = $null
+        $script:DownloadError = $null
         $script:FixturePackage = Join-Path -Path $TestDrive -ChildPath 'Package.zip'
         Set-Content -LiteralPath $script:FixturePackage -Value 'package' -Encoding utf8NoBOM
     }
@@ -176,6 +179,23 @@ Describe 'Invoke-WinPushPackage local path staging' {
         if ($null -ne $script:CopyError) {
             throw $script:CopyError
         }
+    }
+
+    Mock Invoke-WebRequest {
+        param(
+            [uri] $Uri,
+            [string] $OutFile,
+            $ErrorAction
+        )
+
+        $null = $ErrorAction
+        $script:DownloadUris += $Uri
+        $script:DownloadOutFiles += $OutFile
+        if ($null -ne $script:DownloadError) {
+            throw $script:DownloadError
+        }
+
+        Set-Content -LiteralPath $OutFile -Value 'downloaded package' -Encoding utf8NoBOM
     }
 
     Mock Remove-PSSession {
@@ -361,5 +381,84 @@ Describe 'Invoke-WinPushPackage local path staging' {
 
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'downloads one URI package to the admin workstation cache without opening an endpoint session' {
+        $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCache'
+        $uri = 'https://storage.contoso.example/packages/EA%20Install.zip'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName ' PC-001 ' `
+            -Uri $uri `
+            -EntryPoint '.\Install-EA.ps1' `
+            -PackageCacheRoot $cacheRoot
+
+        $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
+        $result.ComputerName | Should Be 'PC-001'
+        $result.Transport | Should Be 'Psrp'
+        $result.Operation | Should Be 'RunPackage'
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemoteDirectoriesCreated).Count | Should Be 0
+        @($script:CopiedPaths).Count | Should Be 0
+        @($script:DownloadUris).Count | Should Be 1
+        $script:DownloadUris[0].OriginalString | Should Be $uri
+        $script:DownloadOutFiles[0] | Should Match ([regex]::Escape($cacheRoot))
+        $script:DownloadOutFiles[0] | Should Match ([regex]::Escape('EA Install.zip'))
+        Test-Path -LiteralPath $script:DownloadOutFiles[0] | Should Be $true
+        $result.PackageMetadata.PSTypeNames[0] | Should Be 'WinPush.PackageMetadata'
+        $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
+        $result.PackageMetadata.PackageSource | Should Be $uri
+        $result.PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
+        $result.PackageMetadata.RemoteStagePath | Should BeNullOrEmpty
+        $result.PackageMetadata.EntryPoint | Should Be '.\Install-EA.ps1'
+        $result.PackageMetadata.Extracted | Should Be $false
+        $result.PackageMetadata.CleanupPolicy | Should Be 'Never'
+        $result.PackageMetadata.LogsCopied | Should Be $false
+        $result.Output[0].LocalPackagePath | Should Be $result.PackageMetadata.LocalPackagePath
+    }
+
+    It 'returns a failed URI package result when download fails before opening an endpoint session' {
+        $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCacheFailure'
+        $script:DownloadError = 'package download failed'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -PackageCacheRoot $cacheRoot
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'package download failed'
+        $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
+        $result.PackageMetadata.LocalPackagePath | Should Match ([regex]::Escape($cacheRoot))
+        $result.PackageMetadata.RemoteStagePath | Should BeNullOrEmpty
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemoteDirectoriesCreated).Count | Should Be 0
+        @($script:CopiedPaths).Count | Should Be 0
+        @($script:DownloadUris).Count | Should Be 1
+    }
+
+    It 'rejects relative URI package sources before opening an endpoint session or downloading' {
+        $result = Invoke-WinPushPackage -ComputerName 'PC-001' -Uri 'packages/EA.zip' -EntryPoint '.\Install-EA.ps1'
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'Uri must be an absolute package URI.'
+        @($script:DownloadUris).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'requires exactly one resolved target before downloading a URI package' {
+        $result = Invoke-WinPushPackage `
+            -ComputerName @('PC-001', 'PC-002') `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1'
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'Invoke-WinPushPackage currently supports exactly one target until roadmap item 11.11.'
+        @($script:DownloadUris).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 }
