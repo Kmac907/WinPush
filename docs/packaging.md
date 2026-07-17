@@ -65,11 +65,11 @@ Additional cleanup:
 - remove local captured output or copied logs under `C:\WinPush` or the caller-supplied `OutputRoot` when no longer needed
 - remove any remote files or changes created by caller-supplied command text, scripts, or file transfers
 
-## Planned Package Workflow
+## Package Workflow
 
-`Invoke-WinPushPackage` is planned post-MVP work. Its command contract and result metadata shape are defined, but the command is not currently exported or executable.
+`Invoke-WinPushPackage` currently stages one existing local package file from the admin workstation to one direct target through PSRP. It creates a remote staging directory under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, and returns a `WinPush.ExecutionResult` with `Operation = RunPackage`.
 
-The planned command is a higher-level workflow built on the primitive commands. It will stage a package, optionally extract it, run a PowerShell entry point from the staged package root, optionally capture output, optionally copy logs/results back, optionally clean up remote staged files, and return `WinPush.ExecutionResult` objects with `Operation = RunPackage`.
+Later package workflow slices add directory packages, URI package download to the admin workstation cache, optional endpoint zip extraction, PowerShell entry-point execution, output capture, log/result copy, cleanup policy, multi-target target sources, and live package validation.
 
 Package workflow results carry `PackageMetadata` on the returned `WinPush.ExecutionResult`. The metadata shape is:
 
@@ -88,7 +88,16 @@ Package workflow results carry `PackageMetadata` on the returned `WinPush.Execut
 | `LogsCopied` | Whether package logs/results were copied. |
 | `CopiedLogPaths` | Local copied log/result paths. |
 
-Planned local package source:
+Current local file staging:
+
+```powershell
+Invoke-WinPushPackage `
+    -ComputerName PC01 `
+    -Path .\EAInstallPackage.zip `
+    -EntryPoint .\Install-EA.ps1
+```
+
+Planned local directory package:
 
 ```powershell
 Invoke-WinPushPackage `
@@ -138,3 +147,11 @@ Planned defaults:
 - Initial entry points are PowerShell `.ps1` files only.
 - Endpoints do not download package URIs directly.
 - The first package workflow scope does not include package integrity switches, native `.exe` or `.cmd` entry points, package manifests, retries, parallel execution, or recursive log copy beyond the approved log behavior.
+
+Current limitations:
+
+- Only local file paths are staged.
+- Directory packages and URI packages are rejected.
+- `-Extract`, `-CaptureOutput`, `-Logs`, and cleanup policies other than `Never` are rejected.
+- `-HostFile`, pipeline target input, and multi-target package workflows are rejected until the target-source package slice is implemented.
+- The package entry point is recorded in metadata but not executed yet.

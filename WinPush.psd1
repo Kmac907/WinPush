@@ -13,6 +13,7 @@
         'Copy-WinPushItem',
         'Get-WinPushLog',
         'Invoke-WinPushCommand',
+        'Invoke-WinPushPackage',
         'Invoke-WinPushScript',
         'Test-WinPushTarget'
     )

@@ -9,7 +9,7 @@
 | `Invoke-WinPushScript` | Runs one existing local `.ps1` file on direct `-ComputerName`, pipeline, pipeline-by-property-name `ComputerName`, or `-HostFile` targets. PSRP uses `Invoke-Command -FilePath`. WinRM and PsExec stage the script through the selected native transport and execute the staged file through remote Windows PowerShell. |
 | `Copy-WinPushItem` | Uploads one existing local file to one target through `Copy-Item -ToSession`, or downloads one remote file through `Copy-Item -FromSession` when `-Direction Download` is supplied. |
 | `Get-WinPushLog` | Copies immediate regular files from one explicit absolute remote Windows directory to the target's local `Logs` folder under a timestamped output run folder. |
-| `Invoke-WinPushPackage` | Planned package workflow command. Its contract is defined but it is not exported or executable until package staging is implemented. |
+| `Invoke-WinPushPackage` | Stages one local package file to one target through PSRP and returns `RunPackage` metadata. Later package slices add URI sources, directories, extraction, execution, artifacts, logs, cleanup, and multi-target workflows. |
 
 ## Parameters
 
@@ -84,25 +84,25 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 
 ### `Invoke-WinPushPackage`
 
-This command is planned and intentionally not exported yet. The locked contract for later package workflow slices is:
+Current package support stages one existing local package file to one resolved direct target through PSRP. The command returns `Operation = RunPackage` and `PackageMetadata` with the local package path and endpoint staging path. Later package workflow slices add URI sources, directory packages, extraction, entry-point execution, output artifacts, logs, cleanup, and multi-target target sources.
 
 | Parameter | Argument | Notes |
 | --- | --- | --- |
 | `-ComputerName` | `string[]` | Target names. Also accepts pipeline strings and pipeline objects with a `ComputerName` property. |
-| `-HostFile` | `string` | UTF-8 file containing target names. |
-| `-Path` | `string` | Local admin-workstation package file or directory. Mutually exclusive with `-Uri`. |
-| `-Uri` | `uri` | Remote package source downloaded to the admin workstation before endpoint staging. Mutually exclusive with `-Path`. |
+| `-HostFile` | `string` | UTF-8 file containing target names. Planned for later package workflows; currently rejected. |
+| `-Path` | `string` | Existing local admin-workstation package file. Mutually exclusive with `-Uri`. Directory packages are planned for later. |
+| `-Uri` | `uri` | Planned remote package source downloaded to the admin workstation before endpoint staging. Currently rejected. Mutually exclusive with `-Path`. |
 | `-EntryPoint` | `string` | PowerShell `.ps1` package entry point relative to the staged package root. Required. |
-| `-Extract` | switch | Planned endpoint zip extraction. |
-| `-CaptureOutput` | switch | Planned package stdout/stderr artifact capture. |
-| `-Logs` | switch | Planned package log/result copy. |
-| `-Cleanup` | `Never`, `OnSuccess`, `Always` | Planned remote staging cleanup policy. Defaults to `Never`. |
+| `-Extract` | switch | Planned endpoint zip extraction. Currently rejected. |
+| `-CaptureOutput` | switch | Planned package stdout/stderr artifact capture. Currently rejected. |
+| `-Logs` | switch | Planned package log/result copy. Currently rejected. |
+| `-Cleanup` | `Never`, `OnSuccess`, `Always` | Planned remote staging cleanup policy. Defaults to `Never`; values other than `Never` are currently rejected. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
-| `-PackageCacheRoot` | `string` | Local admin-workstation URI package cache root. Defaults to `C:\WinPush\PackageCache`. |
+| `-PackageCacheRoot` | `string` | Planned local admin-workstation URI package cache root. Defaults to `C:\WinPush\PackageCache`. |
 | `-RemoteStageRoot` | `string` | Remote endpoint staging root. Defaults to `C:\ProgramData\WinPush\Staging`. |
-| `-Credential` | `PSCredential` | Planned PSRP credential support. |
+| `-Credential` | `PSCredential` | Optional PSRP credential. Uses the current identity when omitted. |
 
-Target input is required from either `-ComputerName`, pipeline input, or `-HostFile`. `-Path` and `-Uri` are mutually exclusive.
+Current package staging supports one resolved direct `-ComputerName` target. `-Path` and `-Uri` are mutually exclusive.
 
 ## Target Input
 
@@ -169,7 +169,7 @@ Command and script behavior is determined by caller-supplied command text or scr
 
 - PowerShell 7.6 `Core` is the supported controller shell.
 - Windows PowerShell 5.1 compatibility is not guaranteed.
-- `Invoke-WinPushPackage` has a locked planned contract but is not exported or executable until package staging is implemented.
+- `Invoke-WinPushPackage` currently stages one local file package to one direct target only. Directory packages, URI packages, extraction, entry-point execution, output capture, log copy, cleanup policies other than `Never`, host-file targets, and multi-target package workflows are not implemented yet.
 - SSH transport, retries, parallel fan-out, persistent sessions, and transport fallback are not implemented.
 - Automatic WinRM, firewall, TrustedHosts, certificate, endpoint, or policy configuration is not implemented.
 - Recursive file transfer, recursive log enumeration, and multi-target file transfer are not implemented.

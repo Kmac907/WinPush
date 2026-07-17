@@ -55,12 +55,139 @@ function Invoke-WinPushPackage {
         if ($PSBoundParameters.ContainsKey('RemoteStageRoot') -and [string]::IsNullOrWhiteSpace($RemoteStageRoot)) {
             throw [System.ArgumentException]::new('RemoteStageRoot must not be empty.')
         }
+
+        $computerNames = [System.Collections.Generic.List[string]]::new()
     }
 
     process {
+        if ($PSCmdlet.ParameterSetName -eq 'PathComputerName' -or $PSCmdlet.ParameterSetName -eq 'UriComputerName') {
+            foreach ($target in @($ComputerName)) {
+                $computerNames.Add($target)
+            }
+        }
     }
 
     end {
-        throw [System.NotSupportedException]::new('Invoke-WinPushPackage is not exported or executable until package staging is implemented in roadmap item 11.2.')
+        if ($PSCmdlet.ParameterSetName -like 'Uri*') {
+            throw [System.NotSupportedException]::new('Uri package sources are not supported until roadmap item 11.4.')
+        }
+
+        if ($PSCmdlet.ParameterSetName -eq 'PathHostFile') {
+            throw [System.NotSupportedException]::new('HostFile package target input is not supported until roadmap item 11.11.')
+        }
+
+        if ($Extract) {
+            throw [System.NotSupportedException]::new('Extract is not supported until roadmap item 11.6.')
+        }
+
+        if ($CaptureOutput) {
+            throw [System.NotSupportedException]::new('CaptureOutput is not supported until roadmap item 11.8.')
+        }
+
+        if ($Logs) {
+            throw [System.NotSupportedException]::new('Logs is not supported until roadmap item 11.9.')
+        }
+
+        if ($Cleanup -ne 'Never') {
+            throw [System.NotSupportedException]::new('Cleanup policies other than Never are not supported until roadmap item 11.10.')
+        }
+
+        $target = if ($computerNames.Count -eq 1) { $computerNames[0] } else { $null }
+        $session = $null
+        $stagePlan = $null
+        $resolvedPackagePath = $Path
+        $sessionCreationStarted = $false
+
+        try {
+            if ([string]::IsNullOrWhiteSpace($Path)) {
+                throw [System.ArgumentException]::new('Path must not be empty.')
+            }
+
+            if (-not (Test-Path -LiteralPath $Path)) {
+                throw [System.IO.FileNotFoundException]::new("Package file was not found: $Path")
+            }
+
+            $packageItem = Get-Item -LiteralPath $Path
+            if ($packageItem.PSProvider.Name -ne 'FileSystem') {
+                throw [System.ArgumentException]::new("Path must refer to a local package file: $Path")
+            }
+
+            if ($packageItem.PSIsContainer) {
+                throw [System.ArgumentException]::new("Path must refer to a local package file: $Path")
+            }
+
+            $resolvedPackagePath = $packageItem.FullName
+            $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
+            if ($targets.Count -ne 1) {
+                throw [System.ArgumentException]::new('Invoke-WinPushPackage currently supports exactly one target until roadmap item 11.11.')
+            }
+
+            $target = $targets[0]
+            $sessionParameters = @{
+                ComputerName = $target
+                ErrorAction  = 'Stop'
+            }
+
+            if ($PSBoundParameters.ContainsKey('Credential')) {
+                $sessionParameters['Credential'] = $Credential
+            }
+
+            $sessionCreationStarted = $true
+            $session = New-PSSession @sessionParameters
+            $stagePlan = New-WinPushPackageStagePlan -RemoteStageRoot $RemoteStageRoot -PackagePath $resolvedPackagePath
+            Invoke-WinPushPsrpPackageStage -Session $session -LocalPackagePath $resolvedPackagePath -StagePlan $stagePlan
+
+            $metadata = New-WinPushPackageInfo `
+                -PackageSourceType Path `
+                -PackageSource $resolvedPackagePath `
+                -LocalPackagePath $resolvedPackagePath `
+                -RemoteStagePath $stagePlan.RemotePackagePath `
+                -EntryPoint $EntryPoint `
+                -CleanupPolicy $Cleanup
+
+            New-WinPushExecutionResult `
+                -ComputerName $target `
+                -Transport 'Psrp' `
+                -Operation 'RunPackage' `
+                -Succeeded $true `
+                -ExitCode 0 `
+                -Output $metadata `
+                -PackageMetadata $metadata
+        }
+        catch {
+            $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $sessionCreationStarted -and $null -eq $session) {
+                'PSRP package staging session creation failed for the target with the supplied credential.'
+            }
+            else {
+                $_.Exception.Message
+            }
+
+            $metadata = $null
+            if ($null -ne $stagePlan) {
+                $metadata = New-WinPushPackageInfo `
+                    -PackageSourceType Path `
+                    -PackageSource $resolvedPackagePath `
+                    -LocalPackagePath $resolvedPackagePath `
+                    -RemoteStagePath $stagePlan.RemotePackagePath `
+                    -EntryPoint $EntryPoint `
+                    -CleanupPolicy $Cleanup
+            }
+
+            $resultComputerName = if ([string]::IsNullOrWhiteSpace($target)) { [string] $ComputerName } else { $target }
+            New-WinPushExecutionResult `
+                -ComputerName $resultComputerName `
+                -Transport 'Psrp' `
+                -Operation 'RunPackage' `
+                -Succeeded $false `
+                -ExitCode 1 `
+                -ErrorMessage $errorMessage `
+                -Errors $errorMessage `
+                -PackageMetadata $metadata
+        }
+        finally {
+            if ($null -ne $session) {
+                Remove-PSSession -Id $session.Id -ErrorAction SilentlyContinue
+            }
+        }
     }
 }

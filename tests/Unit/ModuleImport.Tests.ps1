@@ -5,10 +5,10 @@ Describe 'WinPush module import foundation' {
     It 'uses an explicit manifest export list' {
         $manifest = Import-PowerShellDataFile -LiteralPath $script:ManifestPath
 
-        @($manifest.FunctionsToExport).Count | Should Be 5
-        ($manifest.FunctionsToExport -join ',') | Should Be 'Copy-WinPushItem,Get-WinPushLog,Invoke-WinPushCommand,Invoke-WinPushScript,Test-WinPushTarget'
+        @($manifest.FunctionsToExport).Count | Should Be 6
+        ($manifest.FunctionsToExport -join ',') | Should Be 'Copy-WinPushItem,Get-WinPushLog,Invoke-WinPushCommand,Invoke-WinPushPackage,Invoke-WinPushScript,Test-WinPushTarget'
         ($manifest.FunctionsToExport -notcontains '*') | Should Be $true
-        ($manifest.FunctionsToExport -notcontains 'Invoke-WinPushPackage') | Should Be $true
+        ($manifest.FunctionsToExport -contains 'Invoke-WinPushPackage') | Should Be $true
     }
 
     It 'declares the approved PowerShell runtime and edition' {
@@ -160,10 +160,10 @@ Describe 'WinPush module import foundation' {
         $rootModule | Should Not Match 'PsExec'
     }
 
-    It 'does not export the package workflow command before executable package behavior exists' {
+    It 'exports the package workflow command after local file staging exists' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
 
-        Get-Command -Module WinPush -Name Invoke-WinPushPackage -ErrorAction SilentlyContinue | Should Be $null
+        (Get-Command -Module WinPush -Name Invoke-WinPushPackage -ErrorAction Stop).Name | Should Be 'Invoke-WinPushPackage'
     }
 }
