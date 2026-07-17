@@ -9,7 +9,7 @@
 | `Invoke-WinPushScript` | Runs one existing local `.ps1` file on direct `-ComputerName`, pipeline, pipeline-by-property-name `ComputerName`, or `-HostFile` targets. PSRP uses `Invoke-Command -FilePath`. WinRM and PsExec stage the script through the selected native transport and execute the staged file through remote Windows PowerShell. |
 | `Copy-WinPushItem` | Uploads one existing local file to one target through `Copy-Item -ToSession`, or downloads one remote file through `Copy-Item -FromSession` when `-Direction Download` is supplied. |
 | `Get-WinPushLog` | Copies immediate regular files from one explicit absolute remote Windows directory to the target's local `Logs` folder under a timestamped output run folder. |
-| `Invoke-WinPushPackage` | Stages one local package file to one target through PSRP and returns `RunPackage` metadata. Later package slices add URI sources, directories, extraction, execution, artifacts, logs, cleanup, and multi-target workflows. |
+| `Invoke-WinPushPackage` | Stages one local package file or directory to one target through PSRP and returns `RunPackage` metadata. Later package slices add URI sources, extraction, execution, artifacts, logs, cleanup, and multi-target workflows. |
 
 ## Parameters
 
@@ -84,13 +84,13 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 
 ### `Invoke-WinPushPackage`
 
-Current package support stages one existing local package file to one resolved direct target through PSRP. The command returns `Operation = RunPackage` and `PackageMetadata` with the local package path and endpoint staging path. Later package workflow slices add URI sources, directory packages, extraction, entry-point execution, output artifacts, logs, cleanup, and multi-target target sources.
+Current package support stages one existing local package file or directory to one resolved direct target through PSRP. Directory packages are staged recursively beneath one remote package root while preserving package-relative file layout. The command returns `Operation = RunPackage` and `PackageMetadata` with the local package path and endpoint staging path. Later package workflow slices add URI sources, extraction, entry-point execution, output artifacts, logs, cleanup, and multi-target target sources.
 
 | Parameter | Argument | Notes |
 | --- | --- | --- |
 | `-ComputerName` | `string[]` | Target names. Also accepts pipeline strings and pipeline objects with a `ComputerName` property. |
 | `-HostFile` | `string` | UTF-8 file containing target names. Planned for later package workflows; currently rejected. |
-| `-Path` | `string` | Existing local admin-workstation package file. Mutually exclusive with `-Uri`. Directory packages are planned for later. |
+| `-Path` | `string` | Existing local admin-workstation package file or directory. Mutually exclusive with `-Uri`. |
 | `-Uri` | `uri` | Planned remote package source downloaded to the admin workstation before endpoint staging. Currently rejected. Mutually exclusive with `-Path`. |
 | `-EntryPoint` | `string` | PowerShell `.ps1` package entry point relative to the staged package root. Required. |
 | `-Extract` | switch | Planned endpoint zip extraction. Currently rejected. |
@@ -169,7 +169,7 @@ Command and script behavior is determined by caller-supplied command text or scr
 
 - PowerShell 7.6 `Core` is the supported controller shell.
 - Windows PowerShell 5.1 compatibility is not guaranteed.
-- `Invoke-WinPushPackage` currently stages one local file package to one direct target only. Directory packages, URI packages, extraction, entry-point execution, output capture, log copy, cleanup policies other than `Never`, host-file targets, and multi-target package workflows are not implemented yet.
+- `Invoke-WinPushPackage` currently stages one local file or directory package to one direct target only. URI packages, extraction, entry-point execution, output capture, log copy, cleanup policies other than `Never`, host-file targets, and multi-target package workflows are not implemented yet.
 - SSH transport, retries, parallel fan-out, persistent sessions, and transport fallback are not implemented.
 - Automatic WinRM, firewall, TrustedHosts, certificate, endpoint, or policy configuration is not implemented.
 - Recursive file transfer, recursive log enumeration, and multi-target file transfer are not implemented.

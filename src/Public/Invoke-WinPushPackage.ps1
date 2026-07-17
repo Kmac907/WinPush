@@ -96,6 +96,7 @@ function Invoke-WinPushPackage {
         $session = $null
         $stagePlan = $null
         $resolvedPackagePath = $Path
+        $packageIsDirectory = $false
         $sessionCreationStarted = $false
 
         try {
@@ -109,14 +110,11 @@ function Invoke-WinPushPackage {
 
             $packageItem = Get-Item -LiteralPath $Path
             if ($packageItem.PSProvider.Name -ne 'FileSystem') {
-                throw [System.ArgumentException]::new("Path must refer to a local package file: $Path")
-            }
-
-            if ($packageItem.PSIsContainer) {
-                throw [System.ArgumentException]::new("Path must refer to a local package file: $Path")
+                throw [System.ArgumentException]::new("Path must refer to a local package file or directory: $Path")
             }
 
             $resolvedPackagePath = $packageItem.FullName
+            $packageIsDirectory = [bool] $packageItem.PSIsContainer
             $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
             if ($targets.Count -ne 1) {
                 throw [System.ArgumentException]::new('Invoke-WinPushPackage currently supports exactly one target until roadmap item 11.11.')
@@ -134,7 +132,7 @@ function Invoke-WinPushPackage {
 
             $sessionCreationStarted = $true
             $session = New-PSSession @sessionParameters
-            $stagePlan = New-WinPushPackageStagePlan -RemoteStageRoot $RemoteStageRoot -PackagePath $resolvedPackagePath
+            $stagePlan = New-WinPushPackageStagePlan -RemoteStageRoot $RemoteStageRoot -PackagePath $resolvedPackagePath -Directory:$packageIsDirectory
             Invoke-WinPushPsrpPackageStage -Session $session -LocalPackagePath $resolvedPackagePath -StagePlan $stagePlan
 
             $metadata = New-WinPushPackageInfo `

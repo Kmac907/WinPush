@@ -101,7 +101,7 @@ Describe 'Invoke-WinPushPackage contract' {
     }
 }
 
-Describe 'Invoke-WinPushPackage local file staging' {
+Describe 'Invoke-WinPushPackage local path staging' {
     BeforeEach {
         $script:NewPSSessionComputerNames = @()
         $script:NewPSSessionCredentialSupplied = @()
@@ -195,17 +195,6 @@ Describe 'Invoke-WinPushPackage local file staging' {
         @($script:CopiedPaths).Count | Should Be 0
     }
 
-    It 'validates a local directory before opening a session' {
-        $directoryPath = Join-Path -Path $TestDrive -ChildPath 'PackageDirectory'
-        New-Item -ItemType Directory -Path $directoryPath | Out-Null
-
-        $result = Invoke-WinPushPackage -ComputerName 'PC-001' -Path $directoryPath -EntryPoint '.\Install-EA.ps1'
-
-        $result.Succeeded | Should Be $false
-        $result.ErrorMessage | Should Be "Path must refer to a local package file: $directoryPath"
-        @($script:NewPSSessionComputerNames).Count | Should Be 0
-    }
-
     It 'stages one local file package to one target and returns package metadata' {
         $result = Invoke-WinPushPackage -ComputerName ' PC-001 ' -Path $script:FixturePackage -EntryPoint '.\Install-EA.ps1'
         $resolvedPackagePath = (Get-Item -LiteralPath $script:FixturePackage).FullName
@@ -237,6 +226,41 @@ Describe 'Invoke-WinPushPackage local file staging' {
         $result.PackageMetadata.CleanupSucceeded | Should BeNullOrEmpty
         $result.PackageMetadata.LogsCopied | Should Be $false
         $result.Output[0].RemoteStagePath | Should Be $result.PackageMetadata.RemoteStagePath
+    }
+
+    It 'stages one local directory package to one target while preserving relative file layout' {
+        $directoryPath = Join-Path -Path $TestDrive -ChildPath 'PackageDirectory'
+        $configDirectory = Join-Path -Path $directoryPath -ChildPath 'config'
+        $emptyDirectory = Join-Path -Path $directoryPath -ChildPath 'empty'
+        New-Item -ItemType Directory -Path $configDirectory | Out-Null
+        New-Item -ItemType Directory -Path $emptyDirectory | Out-Null
+        $entryPointPath = Join-Path -Path $directoryPath -ChildPath 'Install-EA.ps1'
+        $configPath = Join-Path -Path $configDirectory -ChildPath 'settings.json'
+        Set-Content -LiteralPath $entryPointPath -Value 'Write-Output package' -Encoding utf8NoBOM
+        Set-Content -LiteralPath $configPath -Value '{}' -Encoding utf8NoBOM
+        $resolvedEntryPointPath = (Get-Item -LiteralPath $entryPointPath).FullName
+        $resolvedConfigPath = (Get-Item -LiteralPath $configPath).FullName
+
+        $result = Invoke-WinPushPackage -ComputerName ' PC-001 ' -Path $directoryPath -EntryPoint '.\Install-EA.ps1'
+        $resolvedPackagePath = (Get-Item -LiteralPath $directoryPath).FullName
+
+        $result.Succeeded | Should Be $true
+        $result.Operation | Should Be 'RunPackage'
+        @($script:RemoteDirectoriesCreated).Count | Should Be 3
+        $remoteStageRoot = $script:RemoteDirectoriesCreated[0]
+        $remoteStageRoot | Should Match ([regex]::Escape('C:\ProgramData\WinPush\Staging\package-'))
+        ($script:RemoteDirectoriesCreated -contains ('{0}\config' -f $remoteStageRoot)) | Should Be $true
+        ($script:RemoteDirectoriesCreated -contains ('{0}\empty' -f $remoteStageRoot)) | Should Be $true
+        @($script:CopiedPaths).Count | Should Be 2
+        ($script:CopiedPaths -contains $resolvedEntryPointPath) | Should Be $true
+        ($script:CopiedPaths -contains $resolvedConfigPath) | Should Be $true
+        ($script:CopiedDestinations -contains ('{0}\Install-EA.ps1' -f $remoteStageRoot)) | Should Be $true
+        ($script:CopiedDestinations -contains ('{0}\config\settings.json' -f $remoteStageRoot)) | Should Be $true
+        ($script:CopiedDirections -contains 'Upload') | Should Be $true
+        $result.PackageMetadata.PackageSource | Should Be $resolvedPackagePath
+        $result.PackageMetadata.LocalPackagePath | Should Be $resolvedPackagePath
+        $result.PackageMetadata.RemoteStagePath | Should Be $remoteStageRoot
+        $result.Output[0].RemoteStagePath | Should Be $remoteStageRoot
     }
 
     It 'uses the supplied remote stage root' {
@@ -304,6 +328,22 @@ Describe 'Invoke-WinPushPackage local file staging' {
         $result.ExitCode | Should Be 1
         $result.ErrorMessage | Should Be 'package upload failed'
         $result.PackageMetadata.RemoteStagePath | Should Be $script:CopiedDestinations[0]
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'returns a failed package result when directory package upload fails and removes the session' {
+        $directoryPath = Join-Path -Path $TestDrive -ChildPath 'PackageDirectoryUploadFailure'
+        New-Item -ItemType Directory -Path $directoryPath | Out-Null
+        Set-Content -LiteralPath (Join-Path -Path $directoryPath -ChildPath 'Install-EA.ps1') -Value 'Write-Output package' -Encoding utf8NoBOM
+        $script:CopyError = 'directory package upload failed'
+
+        $result = Invoke-WinPushPackage -ComputerName 'PC-001' -Path $directoryPath -EntryPoint '.\Install-EA.ps1'
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'directory package upload failed'
+        $result.PackageMetadata.RemoteStagePath | Should Be $script:RemoteDirectoriesCreated[0]
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }

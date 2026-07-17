@@ -67,9 +67,9 @@ Additional cleanup:
 
 ## Package Workflow
 
-`Invoke-WinPushPackage` currently stages one existing local package file from the admin workstation to one direct target through PSRP. It creates a remote staging directory under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, and returns a `WinPush.ExecutionResult` with `Operation = RunPackage`.
+`Invoke-WinPushPackage` currently stages one existing local package file or directory from the admin workstation to one direct target through PSRP. It creates a remote staging directory under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It returns a `WinPush.ExecutionResult` with `Operation = RunPackage`.
 
-Later package workflow slices add directory packages, URI package download to the admin workstation cache, optional endpoint zip extraction, PowerShell entry-point execution, output capture, log/result copy, cleanup policy, multi-target target sources, and live package validation.
+Later package workflow slices add URI package download to the admin workstation cache, optional endpoint zip extraction, PowerShell entry-point execution, output capture, log/result copy, cleanup policy, multi-target target sources, and live package validation.
 
 Package workflow results carry `PackageMetadata` on the returned `WinPush.ExecutionResult`. The metadata shape is:
 
@@ -97,7 +97,7 @@ Invoke-WinPushPackage `
     -EntryPoint .\Install-EA.ps1
 ```
 
-Planned local directory package:
+Current local directory package:
 
 ```powershell
 Invoke-WinPushPackage `
@@ -150,8 +150,8 @@ Planned defaults:
 
 Current limitations:
 
-- Only local file paths are staged.
-- Directory packages and URI packages are rejected.
+- Only local file and directory paths are staged.
+- URI packages are rejected.
 - `-Extract`, `-CaptureOutput`, `-Logs`, and cleanup policies other than `Never` are rejected.
 - `-HostFile`, pipeline target input, and multi-target package workflows are rejected until the target-source package slice is implemented.
 - The package entry point is recorded in metadata but not executed yet.
