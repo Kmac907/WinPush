@@ -45,7 +45,10 @@ function New-WinPushExecutionResult {
         [string] $StdErrPath = $null,
 
         [AllowNull()]
-        [object[]] $CopiedLogPaths = @()
+        [object[]] $CopiedLogPaths = @(),
+
+        [AllowNull()]
+        [object] $PackageMetadata = $null
     )
 
     [object[]] $normalizedOutput = @()
@@ -95,5 +98,6 @@ function New-WinPushExecutionResult {
         StdOutPath        = $normalizedStdOutPath
         StdErrPath        = $normalizedStdErrPath
         CopiedLogPaths    = $normalizedCopiedLogPaths
+        PackageMetadata   = $PackageMetadata
     }
 }

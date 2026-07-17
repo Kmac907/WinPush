@@ -1,7 +1,9 @@
 $script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..')
 $script:FactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushExecutionResult.ps1'
+$script:PackageMetadataFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushPackageInfo.ps1'
 
 . $script:FactoryPath
+. $script:PackageMetadataFactoryPath
 
 Describe 'New-WinPushExecutionResult' {
     It 'creates a WinPush.ExecutionResult with the exact result properties' {
@@ -9,7 +11,7 @@ Describe 'New-WinPushExecutionResult' {
         $propertyNames = @($result.PSObject.Properties.Name)
 
         $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
-        ($propertyNames -join ',') | Should Be 'ComputerName,Transport,Operation,Succeeded,ExitCode,ErrorMessage,Output,Errors,Logs,RunDirectory,ComputerDirectory,ResultPath,StdOutPath,StdErrPath,CopiedLogPaths'
+        ($propertyNames -join ',') | Should Be 'ComputerName,Transport,Operation,Succeeded,ExitCode,ErrorMessage,Output,Errors,Logs,RunDirectory,ComputerDirectory,ResultPath,StdOutPath,StdErrPath,CopiedLogPaths,PackageMetadata'
         ($propertyNames -contains 'Credential') | Should Be $false
         ($propertyNames -contains 'Password') | Should Be $false
     }
@@ -98,6 +100,7 @@ Describe 'New-WinPushExecutionResult' {
         $null -eq $result.ResultPath | Should Be $true
         $null -eq $result.StdOutPath | Should Be $true
         $null -eq $result.StdErrPath | Should Be $true
+        $null -eq $result.PackageMetadata | Should Be $true
     }
 
     It 'captures local artifact paths when supplied' {
@@ -118,5 +121,68 @@ Describe 'New-WinPushExecutionResult' {
         $result.ResultPath | Should Be 'C:\WinPush\10-07-2026-143012\PC-007\result.txt'
         $result.StdOutPath | Should Be 'C:\WinPush\10-07-2026-143012\PC-007\stdout.txt'
         $result.StdErrPath | Should Be 'C:\WinPush\10-07-2026-143012\PC-007\stderr.txt'
+    }
+
+    It 'carries package metadata when supplied' {
+        $metadata = New-WinPushPackageInfo `
+            -PackageSourceType Path `
+            -PackageSource 'C:\Packages\EAInstallPackage.zip' `
+            -LocalPackagePath 'C:\Packages\EAInstallPackage.zip' `
+            -RemoteStagePath 'C:\ProgramData\WinPush\Staging\run-001\EAInstallPackage.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Extracted $true `
+            -CleanupPolicy Always `
+            -CleanupSucceeded $true `
+            -LogsCopied $true `
+            -CopiedLogPaths 'C:\WinPush\run\PC-008\Logs\install.log'
+
+        $result = New-WinPushExecutionResult `
+            -ComputerName 'PC-008' `
+            -Transport 'Psrp' `
+            -Operation 'RunPackage' `
+            -Succeeded $true `
+            -ExitCode 0 `
+            -PackageMetadata $metadata
+
+        $result.Operation | Should Be 'RunPackage'
+        $result.PackageMetadata.PSTypeNames[0] | Should Be 'WinPush.PackageMetadata'
+        $result.PackageMetadata.PackageSourceType | Should Be 'Path'
+        $result.PackageMetadata.PackageSource | Should Be 'C:\Packages\EAInstallPackage.zip'
+        $result.PackageMetadata.RemoteStagePath | Should Be 'C:\ProgramData\WinPush\Staging\run-001\EAInstallPackage.zip'
+        $result.PackageMetadata.EntryPoint | Should Be '.\Install-EA.ps1'
+        $result.PackageMetadata.Extracted | Should Be $true
+        $result.PackageMetadata.CleanupPolicy | Should Be 'Always'
+        $result.PackageMetadata.CleanupSucceeded | Should Be $true
+        $result.PackageMetadata.LogsCopied | Should Be $true
+        ($result.PackageMetadata.CopiedLogPaths -join ',') | Should Be 'C:\WinPush\run\PC-008\Logs\install.log'
+    }
+}
+
+Describe 'New-WinPushPackageInfo' {
+    It 'creates package metadata with the exact property contract' {
+        $metadata = New-WinPushPackageInfo `
+            -PackageSourceType Uri `
+            -PackageSource 'https://storage.contoso.example/packages/EA.zip' `
+            -LocalPackagePath 'C:\WinPush\PackageCache\run-001\EA.zip' `
+            -RemoteStagePath 'C:\ProgramData\WinPush\Staging\run-001\EA.zip' `
+            -EntryPoint '.\Install-EA.ps1'
+
+        $propertyNames = @($metadata.PSObject.Properties.Name)
+
+        $metadata.PSTypeNames[0] | Should Be 'WinPush.PackageMetadata'
+        ($propertyNames -join ',') | Should Be 'PackageSourceType,PackageSource,LocalPackagePath,RemoteStagePath,EntryPoint,Extracted,ExecutionStarted,ExecutionEnded,CleanupPolicy,CleanupSucceeded,LogsCopied,CopiedLogPaths'
+        $metadata.PackageSourceType | Should Be 'Uri'
+        $metadata.PackageSource | Should Be 'https://storage.contoso.example/packages/EA.zip'
+        $metadata.LocalPackagePath | Should Be 'C:\WinPush\PackageCache\run-001\EA.zip'
+        $metadata.RemoteStagePath | Should Be 'C:\ProgramData\WinPush\Staging\run-001\EA.zip'
+        $metadata.EntryPoint | Should Be '.\Install-EA.ps1'
+        $metadata.Extracted | Should Be $false
+        $null -eq $metadata.ExecutionStarted | Should Be $true
+        $null -eq $metadata.ExecutionEnded | Should Be $true
+        $metadata.CleanupPolicy | Should Be 'Never'
+        $null -eq $metadata.CleanupSucceeded | Should Be $true
+        $metadata.LogsCopied | Should Be $false
+        $metadata.CopiedLogPaths -is [object[]] | Should Be $true
+        $metadata.CopiedLogPaths.Count | Should Be 0
     }
 }

@@ -67,9 +67,26 @@ Additional cleanup:
 
 ## Planned Package Workflow
 
-`Invoke-WinPushPackage` is planned post-MVP work and is not currently exported or implemented.
+`Invoke-WinPushPackage` is planned post-MVP work. Its command contract and result metadata shape are defined, but the command is not currently exported or executable.
 
 The planned command is a higher-level workflow built on the primitive commands. It will stage a package, optionally extract it, run a PowerShell entry point from the staged package root, optionally capture output, optionally copy logs/results back, optionally clean up remote staged files, and return `WinPush.ExecutionResult` objects with `Operation = RunPackage`.
+
+Package workflow results carry `PackageMetadata` on the returned `WinPush.ExecutionResult`. The metadata shape is:
+
+| Field | Meaning |
+| --- | --- |
+| `PackageSourceType` | `Path` or `Uri`. |
+| `PackageSource` | Original local path or URI supplied by the operator. |
+| `LocalPackagePath` | Local package path used by the admin workstation. URI packages use the downloaded cache path. |
+| `RemoteStagePath` | Endpoint staging path for the package or staged package root. |
+| `EntryPoint` | Package-relative PowerShell entry point. |
+| `Extracted` | Whether endpoint extraction was performed successfully. |
+| `ExecutionStarted` | Package entry point start time when execution is implemented. |
+| `ExecutionEnded` | Package entry point end time when execution is implemented. |
+| `CleanupPolicy` | `Never`, `OnSuccess`, or `Always`. |
+| `CleanupSucceeded` | Cleanup outcome when cleanup is attempted. |
+| `LogsCopied` | Whether package logs/results were copied. |
+| `CopiedLogPaths` | Local copied log/result paths. |
 
 Planned local package source:
 

@@ -8,6 +8,7 @@ Describe 'WinPush module import foundation' {
         @($manifest.FunctionsToExport).Count | Should Be 5
         ($manifest.FunctionsToExport -join ',') | Should Be 'Copy-WinPushItem,Get-WinPushLog,Invoke-WinPushCommand,Invoke-WinPushScript,Test-WinPushTarget'
         ($manifest.FunctionsToExport -notcontains '*') | Should Be $true
+        ($manifest.FunctionsToExport -notcontains 'Invoke-WinPushPackage') | Should Be $true
     }
 
     It 'declares the approved PowerShell runtime and edition' {
@@ -157,5 +158,12 @@ Describe 'WinPush module import foundation' {
         $rootModule | Should Not Match 'Copy-Item'
         $rootModule | Should Not Match 'winrs'
         $rootModule | Should Not Match 'PsExec'
+    }
+
+    It 'does not export the package workflow command before executable package behavior exists' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        Get-Command -Module WinPush -Name Invoke-WinPushPackage -ErrorAction SilentlyContinue | Should Be $null
     }
 }
