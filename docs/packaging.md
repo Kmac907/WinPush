@@ -67,9 +67,9 @@ Additional cleanup:
 
 ## Package Workflow
 
-`Invoke-WinPushPackage` currently stages one existing local package file or directory from the admin workstation to one direct target through PSRP. It creates a remote staging directory under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It can also download one absolute URI package to the admin-workstation cache without opening an endpoint session. It returns a `WinPush.ExecutionResult` with `Operation = RunPackage`.
+`Invoke-WinPushPackage` currently stages one existing local package file or directory from the admin workstation to one direct target through PSRP. It creates a remote staging directory under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It can also download one absolute URI package to the admin-workstation cache, then upload the cached package file to one direct target through PSRP. It returns a `WinPush.ExecutionResult` with `Operation = RunPackage`.
 
-Later package workflow slices add cached URI endpoint staging, optional endpoint zip extraction, PowerShell entry-point execution, output capture, log/result copy, cleanup policy, multi-target target sources, and live package validation.
+Later package workflow slices add optional endpoint zip extraction, PowerShell entry-point execution, output capture, log/result copy, cleanup policy, multi-target target sources, and live package validation.
 
 Package workflow results carry `PackageMetadata` on the returned `WinPush.ExecutionResult`. The metadata shape is:
 
@@ -116,7 +116,7 @@ Invoke-WinPushPackage `
     -Extract
 ```
 
-Current remote package source downloaded by the admin workstation first:
+Current remote package source downloaded by the admin workstation first, then staged to the endpoint:
 
 ```powershell
 Invoke-WinPushPackage `
@@ -149,8 +149,8 @@ Defaults:
 
 Current limitations:
 
-- Only local file and directory paths are staged to endpoints.
-- URI packages are downloaded to the admin-workstation cache but are not staged to endpoints yet.
+- Local files, local directories, and cached URI package files are staged to endpoints.
+- URI packages are downloaded only by the admin workstation, then uploaded to endpoints through PSRP.
 - `-Extract`, `-CaptureOutput`, `-Logs`, and cleanup policies other than `Never` are rejected.
 - `-HostFile`, pipeline target input, and multi-target package workflows are rejected until the target-source package slice is implemented.
 - The package entry point is recorded in metadata but not executed yet.

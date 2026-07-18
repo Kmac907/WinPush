@@ -90,7 +90,11 @@ function Invoke-WinPushPackage {
 
         if ($PSCmdlet.ParameterSetName -eq 'UriComputerName') {
             $target = if ($computerNames.Count -eq 1) { $computerNames[0] } else { $null }
+            $session = $null
             $cachePlan = $null
+            $stagePlan = $null
+            $localPackagePath = $null
+            $sessionCreationStarted = $false
 
             try {
                 $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
@@ -101,11 +105,25 @@ function Invoke-WinPushPackage {
                 $target = $targets[0]
                 $cachePlan = New-WinPushPackageCachePlan -Uri $Uri -PackageCacheRoot $PackageCacheRoot
                 $localPackagePath = Save-WinPushPackageUriToCache -Uri $Uri -CachePlan $cachePlan
+                $sessionParameters = @{
+                    ComputerName = $target
+                    ErrorAction  = 'Stop'
+                }
+
+                if ($PSBoundParameters.ContainsKey('Credential')) {
+                    $sessionParameters['Credential'] = $Credential
+                }
+
+                $sessionCreationStarted = $true
+                $session = New-PSSession @sessionParameters
+                $stagePlan = New-WinPushPackageStagePlan -RemoteStageRoot $RemoteStageRoot -PackagePath $localPackagePath
+                Invoke-WinPushPsrpPackageStage -Session $session -LocalPackagePath $localPackagePath -StagePlan $stagePlan
 
                 $metadata = New-WinPushPackageInfo `
                     -PackageSourceType Uri `
                     -PackageSource $Uri.OriginalString `
                     -LocalPackagePath $localPackagePath `
+                    -RemoteStagePath $stagePlan.RemotePackagePath `
                     -EntryPoint $EntryPoint `
                     -CleanupPolicy $Cleanup
 
@@ -119,12 +137,22 @@ function Invoke-WinPushPackage {
                     -PackageMetadata $metadata
             }
             catch {
+                $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $sessionCreationStarted -and $null -eq $session) {
+                    'PSRP package staging session creation failed for the target with the supplied credential.'
+                }
+                else {
+                    $_.Exception.Message
+                }
+
                 $metadata = $null
                 if ($null -ne $cachePlan) {
+                    $metadataLocalPackagePath = if ([string]::IsNullOrWhiteSpace($localPackagePath)) { $cachePlan.LocalPackagePath } else { $localPackagePath }
+                    $metadataRemoteStagePath = if ($null -eq $stagePlan) { $null } else { $stagePlan.RemotePackagePath }
                     $metadata = New-WinPushPackageInfo `
                         -PackageSourceType Uri `
                         -PackageSource $Uri.OriginalString `
-                        -LocalPackagePath $cachePlan.LocalPackagePath `
+                        -LocalPackagePath $metadataLocalPackagePath `
+                        -RemoteStagePath $metadataRemoteStagePath `
                         -EntryPoint $EntryPoint `
                         -CleanupPolicy $Cleanup
                 }
@@ -136,9 +164,14 @@ function Invoke-WinPushPackage {
                     -Operation 'RunPackage' `
                     -Succeeded $false `
                     -ExitCode 1 `
-                    -ErrorMessage $_.Exception.Message `
-                    -Errors $_.Exception.Message `
+                    -ErrorMessage $errorMessage `
+                    -Errors $errorMessage `
                     -PackageMetadata $metadata
+            }
+            finally {
+                if ($null -ne $session) {
+                    Remove-PSSession -Id $session.Id -ErrorAction SilentlyContinue
+                }
             }
 
             return

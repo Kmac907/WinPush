@@ -383,7 +383,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }
 
-    It 'downloads one URI package to the admin workstation cache without opening an endpoint session' {
+    It 'downloads one URI package to the admin workstation cache, stages it to one target, and returns package metadata' {
         $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCache'
         $uri = 'https://storage.contoso.example/packages/EA%20Install.zip'
 
@@ -399,9 +399,16 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.Operation | Should Be 'RunPackage'
         $result.Succeeded | Should Be $true
         $result.ExitCode | Should Be 0
-        @($script:NewPSSessionComputerNames).Count | Should Be 0
-        @($script:RemoteDirectoriesCreated).Count | Should Be 0
-        @($script:CopiedPaths).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 1
+        $script:NewPSSessionComputerNames[0] | Should Be 'PC-001'
+        @($script:RemoteDirectoriesCreated).Count | Should Be 1
+        $script:RemoteDirectoriesCreated[0] | Should Match ([regex]::Escape('C:\ProgramData\WinPush\Staging\package-'))
+        @($script:CopiedPaths).Count | Should Be 1
+        $script:CopiedPaths[0] | Should Be $script:DownloadOutFiles[0]
+        $script:CopiedDirections[0] | Should Be 'Upload'
+        $script:CopiedDestinations[0] | Should Match ([regex]::Escape('C:\ProgramData\WinPush\Staging\package-'))
+        $script:CopiedDestinations[0] | Should Match ([regex]::Escape('\EA Install.zip'))
+        [object]::ReferenceEquals($script:CopiedSessions[0], $script:SessionToReturn) | Should Be $true
         @($script:DownloadUris).Count | Should Be 1
         $script:DownloadUris[0].OriginalString | Should Be $uri
         $script:DownloadOutFiles[0] | Should Match ([regex]::Escape($cacheRoot))
@@ -411,12 +418,15 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
         $result.PackageMetadata.PackageSource | Should Be $uri
         $result.PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
-        $result.PackageMetadata.RemoteStagePath | Should BeNullOrEmpty
+        $result.PackageMetadata.RemoteStagePath | Should Be $script:CopiedDestinations[0]
         $result.PackageMetadata.EntryPoint | Should Be '.\Install-EA.ps1'
         $result.PackageMetadata.Extracted | Should Be $false
         $result.PackageMetadata.CleanupPolicy | Should Be 'Never'
         $result.PackageMetadata.LogsCopied | Should Be $false
         $result.Output[0].LocalPackagePath | Should Be $result.PackageMetadata.LocalPackagePath
+        $result.Output[0].RemoteStagePath | Should Be $result.PackageMetadata.RemoteStagePath
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }
 
     It 'returns a failed URI package result when download fails before opening an endpoint session' {
@@ -439,6 +449,114 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         @($script:RemoteDirectoriesCreated).Count | Should Be 0
         @($script:CopiedPaths).Count | Should Be 0
         @($script:DownloadUris).Count | Should Be 1
+    }
+
+    It 'returns a failed URI package result when session creation fails after download' {
+        $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCacheSessionFailure'
+        $script:NewPSSessionError = 'uri package session failed'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -PackageCacheRoot $cacheRoot
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'uri package session failed'
+        $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
+        $result.PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
+        $result.PackageMetadata.RemoteStagePath | Should BeNullOrEmpty
+        @($script:DownloadUris).Count | Should Be 1
+        @($script:NewPSSessionComputerNames).Count | Should Be 1
+        @($script:RemoteDirectoriesCreated).Count | Should Be 0
+        @($script:CopiedPaths).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 0
+    }
+
+    It 'passes the supplied credential object unchanged when staging a cached URI package' {
+        $credential = Get-TestCredential -Secret 'Distinctive-Uri-Package-Credential-Secret!'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Credential $credential
+
+        $result.Succeeded | Should Be $true
+        @($script:NewPSSessionCredentialSupplied).Count | Should Be 1
+        $script:NewPSSessionCredentialSupplied[0] | Should Be $true
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
+    }
+
+    It 'normalizes cached URI package credential session failures without leaking distinctive secret material' {
+        $secret = 'Distinctive-Uri-Package-Session-Secret!'
+        $credential = Get-TestCredential -Secret $secret
+        $script:NewPSSessionError = "authentication failed for $secret"
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Credential $credential
+        $diagnosticText = @(
+            $result.ErrorMessage
+            @($result.Errors)
+            @($result.Output)
+            @($result.Logs)
+        ) -join "`n"
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'PSRP package staging session creation failed for the target with the supplied credential.'
+        $diagnosticText | Should Not Match ([regex]::Escape($secret))
+        @($script:CopiedPaths).Count | Should Be 0
+    }
+
+    It 'returns a failed URI package result when remote staging directory creation fails and removes the session' {
+        $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCacheStageFailure'
+        $script:RemoteDirectoryError = 'uri remote staging directory failed'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -PackageCacheRoot $cacheRoot
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'uri remote staging directory failed'
+        $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
+        $result.PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
+        $result.PackageMetadata.RemoteStagePath | Should Match ([regex]::Escape('C:\ProgramData\WinPush\Staging\package-'))
+        @($script:DownloadUris).Count | Should Be 1
+        @($script:NewPSSessionComputerNames).Count | Should Be 1
+        @($script:CopiedPaths).Count | Should Be 0
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'returns a failed URI package result when cached package upload fails and removes the session' {
+        $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCacheUploadFailure'
+        $script:CopyError = 'uri cached package upload failed'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -PackageCacheRoot $cacheRoot
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'uri cached package upload failed'
+        $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
+        $result.PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
+        $result.PackageMetadata.RemoteStagePath | Should Be $script:CopiedDestinations[0]
+        @($script:DownloadUris).Count | Should Be 1
+        @($script:NewPSSessionComputerNames).Count | Should Be 1
+        @($script:CopiedPaths).Count | Should Be 1
+        $script:CopiedPaths[0] | Should Be $script:DownloadOutFiles[0]
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }
 
     It 'rejects relative URI package sources before opening an endpoint session or downloading' {
