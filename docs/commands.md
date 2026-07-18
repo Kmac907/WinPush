@@ -35,7 +35,7 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 | `-Transport` | `Psrp`, `WinRM`, `PsExec` | Optional. Defaults to `Psrp`. |
 | `-PsExecPath` | `string` | Optional path to `PsExec.exe`; only valid with `-Transport PsExec`. |
 | `-Credential` | `PSCredential` | Optional PSRP credential. Not supported with `WinRM` or `PsExec`. |
-| `-CaptureOutput` | switch | Writes `summary.csv`, `result.txt`, `stdout.txt`, and `stderr.txt`. Supported with every transport. |
+| `-CaptureOutput` | switch | Writes one run-level `summary.csv` and one per-target `run.log`. Supported with every transport. |
 | `-Logs` | switch | Copies convention-based command logs. Not supported with `WinRM` or `PsExec`. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
 
@@ -51,7 +51,7 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 | `-Transport` | `Psrp`, `WinRM`, `PsExec` | Optional. Defaults to `Psrp`. |
 | `-PsExecPath` | `string` | Optional path to `PsExec.exe`; only valid with `-Transport PsExec`. |
 | `-Credential` | `PSCredential` | Optional PSRP credential. Not supported with `WinRM` or `PsExec`. |
-| `-CaptureOutput` | switch | Writes `summary.csv`, `result.txt`, `stdout.txt`, and `stderr.txt`. Supported with every transport. |
+| `-CaptureOutput` | switch | Writes one run-level `summary.csv` and one per-target `run.log`. Supported with every transport. |
 | `-Logs` | switch | Copies convention-based script logs. Not supported with `WinRM` or `PsExec`. |
 | `-KeepStagedScript` | switch | Leaves the staged native-transport script folder on the target for troubleshooting. Native script staging is removed by default. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
@@ -94,7 +94,7 @@ Current package support stages one existing local package file or directory to o
 | `-Uri` | `uri` | Absolute remote package source downloaded to the admin-workstation cache before endpoint staging. Mutually exclusive with `-Path`. |
 | `-EntryPoint` | `string` | PowerShell `.ps1` package entry point relative to the staged package root. Required. |
 | `-Extract` | switch | Extracts staged `.zip` package files on the endpoint into the package staging directory. Non-zip files and directory packages are rejected. |
-| `-CaptureOutput` | switch | Planned package stdout/stderr artifact capture. Currently rejected. |
+| `-CaptureOutput` | switch | Planned package `summary.csv` and per-target `run.log` artifact capture. Currently rejected. |
 | `-Logs` | switch | Planned package log/result copy. Currently rejected. |
 | `-Cleanup` | `Never`, `OnSuccess`, `Always` | Planned remote staging cleanup policy. Defaults to `Never`; values other than `Never` are currently rejected. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
@@ -131,7 +131,7 @@ Native script transports copy the local `.ps1` file to `C:\Windows\Temp\WinPush\
 
 ## Logs
 
-`Get-WinPushLog` copies immediate regular files only from an explicit remote directory. It does not read copied file contents into memory, traverse nested directories, create remote directories, write `summary.csv` or `result.txt`, or recurse.
+`Get-WinPushLog` copies immediate regular files only from an explicit remote directory. It does not read copied file contents into memory, traverse nested directories, create remote directories, write `summary.csv` or `run.log`, or recurse.
 
 `Invoke-WinPushCommand -Logs` copies immediate regular files from `C:\ProgramData\EA\Logs\<command-name>\`, where `<command-name>` is derived from the first command name in the supplied PowerShell source and falls back to `Command`.
 

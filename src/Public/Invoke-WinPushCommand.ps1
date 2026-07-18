@@ -125,6 +125,7 @@ function Invoke-WinPushCommand {
                             -RunDirectory $sharedRunDirectory `
                             -Operation 'RunCommand' `
                             -Transport $Transport `
+                            -ArtifactIdentity $Command `
                             -Succeeded $succeeded `
                             -ExitCode $exitCode `
                             -ErrorMessage $errorMessage
@@ -162,6 +163,7 @@ function Invoke-WinPushCommand {
                             -RunDirectory $sharedRunDirectory `
                             -Operation 'RunCommand' `
                             -Transport $Transport `
+                            -ArtifactIdentity $Command `
                             -Succeeded $false `
                             -ExitCode 1 `
                             -ErrorMessage $errorMessage
@@ -210,6 +212,7 @@ function Invoke-WinPushCommand {
                         -RunDirectory $sharedRunDirectory `
                         -Operation 'RunCommand' `
                         -Transport 'Psrp' `
+                        -ArtifactIdentity $Command `
                         -Succeeded $succeeded `
                         -ExitCode $exitCode `
                         -ErrorMessage $errorMessage
@@ -290,6 +293,7 @@ function Invoke-WinPushCommand {
                         -RunDirectory $sharedRunDirectory `
                         -Operation 'RunCommand' `
                         -Transport 'Psrp' `
+                        -ArtifactIdentity $Command `
                         -Succeeded $false `
                         -ExitCode 1 `
                         -ErrorMessage $errorMessage

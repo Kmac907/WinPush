@@ -184,6 +184,7 @@ function Invoke-WinPushScript {
                         -RunDirectory $sharedRunDirectory `
                         -Operation 'RunScript' `
                         -Transport $Transport `
+                        -ArtifactIdentity $resolvedScriptPath `
                         -Succeeded $succeeded `
                         -ExitCode $exitCode `
                         -ErrorMessage $errorMessage
@@ -231,6 +232,7 @@ function Invoke-WinPushScript {
                         -RunDirectory $sharedRunDirectory `
                         -Operation 'RunScript' `
                         -Transport 'Psrp' `
+                        -ArtifactIdentity $resolvedScriptPath `
                         -Succeeded $succeeded `
                         -ExitCode $exitCode `
                         -ErrorMessage $errorMessage
@@ -311,6 +313,7 @@ function Invoke-WinPushScript {
                         -RunDirectory $sharedRunDirectory `
                         -Operation 'RunScript' `
                         -Transport 'Psrp' `
+                        -ArtifactIdentity $resolvedScriptPath `
                         -Succeeded $false `
                         -ExitCode 1 `
                         -ErrorMessage $errorMessage

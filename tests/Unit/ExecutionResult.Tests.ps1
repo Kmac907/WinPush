@@ -112,15 +112,13 @@ Describe 'New-WinPushExecutionResult' {
             -ExitCode 0 `
             -RunDirectory 'C:\WinPush\10-07-2026-143012' `
             -ComputerDirectory 'C:\WinPush\10-07-2026-143012\PC-007' `
-            -ResultPath 'C:\WinPush\10-07-2026-143012\PC-007\result.txt' `
-            -StdOutPath 'C:\WinPush\10-07-2026-143012\PC-007\stdout.txt' `
-            -StdErrPath 'C:\WinPush\10-07-2026-143012\PC-007\stderr.txt'
+            -ResultPath 'C:\WinPush\10-07-2026-143012\PC-007\run.log'
 
         $result.RunDirectory | Should Be 'C:\WinPush\10-07-2026-143012'
         $result.ComputerDirectory | Should Be 'C:\WinPush\10-07-2026-143012\PC-007'
-        $result.ResultPath | Should Be 'C:\WinPush\10-07-2026-143012\PC-007\result.txt'
-        $result.StdOutPath | Should Be 'C:\WinPush\10-07-2026-143012\PC-007\stdout.txt'
-        $result.StdErrPath | Should Be 'C:\WinPush\10-07-2026-143012\PC-007\stderr.txt'
+        $result.ResultPath | Should Be 'C:\WinPush\10-07-2026-143012\PC-007\run.log'
+        $null -eq $result.StdOutPath | Should Be $true
+        $null -eq $result.StdErrPath | Should Be $true
     }
 
     It 'carries package metadata when supplied' {

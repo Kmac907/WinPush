@@ -870,21 +870,28 @@ Describe 'Invoke-WinPushScript' {
         $result.Succeeded | Should Be $true
         $result.RunDirectory.StartsWith($outputRoot) | Should Be $true
         $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
-        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt')
-        $result.StdOutPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt')
-        $result.StdErrPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt')
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'run.log')
+        $null -eq $result.StdOutPath | Should Be $true
+        $null -eq $result.StdErrPath | Should Be $true
         Test-Path -LiteralPath $result.ResultPath -PathType Leaf | Should Be $true
-        Test-Path -LiteralPath $result.StdOutPath -PathType Leaf | Should Be $true
-        Test-Path -LiteralPath $result.StdErrPath -PathType Leaf | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt') -PathType Leaf | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt') -PathType Leaf | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt') -PathType Leaf | Should Be $false
         $resultText = Get-Content -LiteralPath $result.ResultPath -Raw
+        $resultText | Should Match 'Timestamp    : '
         $resultText | Should Match 'ComputerName : PC-001'
         $resultText | Should Match 'Operation    : RunScript'
         $resultText | Should Match 'Transport    : Psrp'
+        $resultText | Should Match 'Identity     : .+Invoke-WinPushScript-Fixture\.ps1'
         $resultText | Should Match 'Succeeded    : True'
         $resultText | Should Match 'ExitCode     : 0'
-        $resultText | Should Match 'StdOutPath'
-        $resultText | Should Match 'StdErrPath'
-        $resultText | Should Match 'ErrorMessage:'
+        $resultText | Should Match 'ErrorMessage : '
+        $resultText | Should Match 'Output:'
+        $resultText | Should Match 'first line'
+        $resultText | Should Match 'second line'
+        $resultText | Should Match 'Errors:'
+        $resultText | Should Not Match 'StdOutPath'
+        $resultText | Should Not Match 'StdErrPath'
         $summaryPath = Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'
         Test-Path -LiteralPath $summaryPath -PathType Leaf | Should Be $true
         $summaryRows = @(Import-Csv -LiteralPath $summaryPath)
@@ -895,10 +902,8 @@ Describe 'Invoke-WinPushScript' {
         $summaryRows[0].Succeeded | Should Be 'True'
         $summaryRows[0].ExitCode | Should Be '0'
         $summaryRows[0].ResultPath | Should Be $result.ResultPath
-        $summaryRows[0].StdOutPath | Should Be $result.StdOutPath
-        $summaryRows[0].StdErrPath | Should Be $result.StdErrPath
-        (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'first line,second line'
-        @(Get-Content -LiteralPath $result.StdErrPath).Count | Should Be 0
+        $summaryRows[0].StdOutPath | Should Be ''
+        $summaryRows[0].StdErrPath | Should Be ''
     }
 
     It 'writes script-attached logs under the captured script artifact folder' {
@@ -932,10 +937,12 @@ Describe 'Invoke-WinPushScript' {
         $results[0].RunDirectory | Should Be $results[1].RunDirectory
         $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
         $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
-        $results[0].ResultPath | Should Be (Join-Path -Path $results[0].ComputerDirectory -ChildPath 'result.txt')
-        $results[1].ResultPath | Should Be (Join-Path -Path $results[1].ComputerDirectory -ChildPath 'result.txt')
-        (Get-Content -LiteralPath $results[0].StdOutPath) -join ',' | Should Be 'first target'
-        (Get-Content -LiteralPath $results[1].StdOutPath) -join ',' | Should Be 'second target'
+        $results[0].ResultPath | Should Be (Join-Path -Path $results[0].ComputerDirectory -ChildPath 'run.log')
+        $results[1].ResultPath | Should Be (Join-Path -Path $results[1].ComputerDirectory -ChildPath 'run.log')
+        $null -eq $results[0].StdOutPath | Should Be $true
+        $null -eq $results[1].StdOutPath | Should Be $true
+        (Get-Content -LiteralPath $results[0].ResultPath -Raw) | Should Match 'first target'
+        (Get-Content -LiteralPath $results[1].ResultPath -Raw) | Should Match 'second target'
         Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001') -PathType Container | Should Be $true
         Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-002') -PathType Container | Should Be $true
         Test-Path -LiteralPath $results[0].ResultPath -PathType Leaf | Should Be $true
@@ -945,6 +952,8 @@ Describe 'Invoke-WinPushScript' {
         ($summaryRows.ComputerName -join ',') | Should Be 'PC-001,PC-002'
         ($summaryRows.Operation -join ',') | Should Be 'RunScript,RunScript'
         ($summaryRows.ResultPath -join ',') | Should Be (($results[0].ResultPath, $results[1].ResultPath) -join ',')
+        ($summaryRows.StdOutPath -join ',') | Should Be ','
+        ($summaryRows.StdErrPath -join ',') | Should Be ','
     }
 
     It 'captures pipeline ComputerName output under one shared run folder' {
@@ -964,8 +973,10 @@ Describe 'Invoke-WinPushScript' {
         $results[0].RunDirectory | Should Be $results[1].RunDirectory
         $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
         $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
-        (Get-Content -LiteralPath $results[0].StdOutPath) -join ',' | Should Be 'first target'
-        (Get-Content -LiteralPath $results[1].StdOutPath) -join ',' | Should Be 'second target'
+        $null -eq $results[0].StdOutPath | Should Be $true
+        $null -eq $results[0].StdErrPath | Should Be $true
+        (Get-Content -LiteralPath $results[0].ResultPath -Raw) | Should Match 'first target'
+        (Get-Content -LiteralPath $results[1].ResultPath -Raw) | Should Match 'second target'
         Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001') -PathType Container | Should Be $true
         Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-002') -PathType Container | Should Be $true
     }
@@ -989,8 +1000,10 @@ Describe 'Invoke-WinPushScript' {
         $results[0].RunDirectory | Should Be $results[1].RunDirectory
         $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
         $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
-        (Get-Content -LiteralPath $results[0].StdOutPath) -join ',' | Should Be 'first target'
-        (Get-Content -LiteralPath $results[1].StdOutPath) -join ',' | Should Be 'second target'
+        $null -eq $results[0].StdOutPath | Should Be $true
+        $null -eq $results[0].StdErrPath | Should Be $true
+        (Get-Content -LiteralPath $results[0].ResultPath -Raw) | Should Match 'first target'
+        (Get-Content -LiteralPath $results[1].ResultPath -Raw) | Should Match 'second target'
         Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001') -PathType Container | Should Be $true
         Test-Path -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-002') -PathType Container | Should Be $true
         $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'summary.csv'))
@@ -998,9 +1011,11 @@ Describe 'Invoke-WinPushScript' {
         ($summaryRows.ComputerName -join ',') | Should Be 'PC-001,PC-002'
         ($summaryRows.Operation -join ',') | Should Be 'RunScript,RunScript'
         ($summaryRows.ResultPath -join ',') | Should Be (($results[0].ResultPath, $results[1].ResultPath) -join ',')
+        ($summaryRows.StdOutPath -join ',') | Should Be ','
+        ($summaryRows.StdErrPath -join ',') | Should Be ','
     }
 
-    It 'captures script errors to stderr artifact when requested' {
+    It 'captures script errors to the script run log when requested' {
         $script:InvokeScriptOutput = @()
         $script:InvokeScriptErrors = @('script failed')
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
@@ -1010,10 +1025,12 @@ Describe 'Invoke-WinPushScript' {
         $result.Succeeded | Should Be $false
         $result.ExitCode | Should Be 1
         $result.ErrorMessage | Should Be 'script failed'
-        (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'script failed'
+        $null -eq $result.StdOutPath | Should Be $true
+        $null -eq $result.StdErrPath | Should Be $true
+        (Get-Content -LiteralPath $result.ResultPath -Raw) | Should Match 'script failed'
     }
 
-    It 'captures retained script output to stdout and script errors to stderr when both are present' {
+    It 'captures retained script output and errors to the run log when both are present' {
         $script:InvokeScriptOutput = @('first output', 'second output')
         $script:InvokeScriptErrors = @('first error', 'second error')
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
@@ -1029,8 +1046,13 @@ Describe 'Invoke-WinPushScript' {
         $result.Output[1] | Should Be 'second output'
         $result.Errors[0] | Should Be 'first error'
         $result.Errors[1] | Should Be 'second error'
-        (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'first output,second output'
-        (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'first error,second error'
+        $null -eq $result.StdOutPath | Should Be $true
+        $null -eq $result.StdErrPath | Should Be $true
+        $logText = Get-Content -LiteralPath $result.ResultPath -Raw
+        $logText | Should Match 'first output'
+        $logText | Should Match 'second output'
+        $logText | Should Match 'first error'
+        $logText | Should Match 'second error'
     }
 
     It 'runs one script through WinRM transport using a staged remote script file' {
@@ -1095,7 +1117,7 @@ Describe 'Invoke-WinPushScript' {
         @($script:RemovedSessionIds).Count | Should Be 0
     }
 
-    It 'captures WinRM script output to artifact files when requested' {
+    It 'captures WinRM script output to run log artifacts when requested' {
         $script:NativeProcessStandardOutput = "native script output`r`n"
         $script:NativeProcessStandardError = "native script warning`r`n"
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'WinPush'
@@ -1105,18 +1127,24 @@ Describe 'Invoke-WinPushScript' {
         $result.Transport | Should Be 'WinRM'
         $result.Succeeded | Should Be $true
         $result.RunDirectory.StartsWith($outputRoot) | Should Be $true
-        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt')
-        $result.StdOutPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt')
-        $result.StdErrPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt')
-        (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'native script output'
-        (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'native script warning'
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'run.log')
+        $null -eq $result.StdOutPath | Should Be $true
+        $null -eq $result.StdErrPath | Should Be $true
+        $logText = Get-Content -LiteralPath $result.ResultPath -Raw
+        $logText | Should Match 'native script output'
+        $logText | Should Match 'native script warning'
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt') -PathType Leaf | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt') -PathType Leaf | Should Be $false
         $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'))
         @($summaryRows).Count | Should Be 1
         $summaryRows[0].Operation | Should Be 'RunScript'
         $summaryRows[0].Transport | Should Be 'WinRM'
+        $summaryRows[0].ResultPath | Should Be $result.ResultPath
+        $summaryRows[0].StdOutPath | Should Be ''
+        $summaryRows[0].StdErrPath | Should Be ''
     }
 
-    It 'captures PsExec script output to artifact files when requested' {
+    It 'captures PsExec script output to run log artifacts when requested' {
         $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-script-capture.exe'
         Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
         $script:NativeProcessStandardOutput = "psexec script output`r`n"
@@ -1128,15 +1156,21 @@ Describe 'Invoke-WinPushScript' {
         $result.Transport | Should Be 'PsExec'
         $result.Succeeded | Should Be $true
         $result.RunDirectory.StartsWith($outputRoot) | Should Be $true
-        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt')
-        $result.StdOutPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt')
-        $result.StdErrPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt')
-        (Get-Content -LiteralPath $result.StdOutPath) -join ',' | Should Be 'psexec script output'
-        (Get-Content -LiteralPath $result.StdErrPath) -join ',' | Should Be 'psexec script warning'
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'run.log')
+        $null -eq $result.StdOutPath | Should Be $true
+        $null -eq $result.StdErrPath | Should Be $true
+        $logText = Get-Content -LiteralPath $result.ResultPath -Raw
+        $logText | Should Match 'psexec script output'
+        $logText | Should Match 'psexec script warning'
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt') -PathType Leaf | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt') -PathType Leaf | Should Be $false
         $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'))
         @($summaryRows).Count | Should Be 1
         $summaryRows[0].Operation | Should Be 'RunScript'
         $summaryRows[0].Transport | Should Be 'PsExec'
+        $summaryRows[0].ResultPath | Should Be $result.ResultPath
+        $summaryRows[0].StdOutPath | Should Be ''
+        $summaryRows[0].StdErrPath | Should Be ''
     }
 
     It 'keeps the staged native script when requested' {

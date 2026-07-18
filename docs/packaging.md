@@ -139,6 +139,8 @@ Invoke-WinPushPackage `
     -Cleanup Always
 ```
 
+When package `-CaptureOutput` is implemented, it is planned to use the same local artifact shape as command and script execution: one run-level `summary.csv` and one per-target `run.log`.
+
 Defaults:
 
 - URI packages download to `C:\WinPush\PackageCache\<run-timestamp>\` on the admin workstation before endpoint staging.

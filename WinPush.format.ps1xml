@@ -12,7 +12,7 @@
             <EntrySelectedBy>
               <SelectionCondition>
                 <TypeName>WinPush.ExecutionResult</TypeName>
-                <ScriptBlock>$null -ne $_.StdOutPath -or $null -ne $_.StdErrPath</ScriptBlock>
+                <ScriptBlock>$null -ne $_.ResultPath</ScriptBlock>
               </SelectionCondition>
             </EntrySelectedBy>
             <ListItems>
@@ -36,10 +36,7 @@
                 <PropertyName>ErrorMessage</PropertyName>
               </ListItem>
               <ListItem>
-                <PropertyName>StdOutPath</PropertyName>
-              </ListItem>
-              <ListItem>
-                <PropertyName>StdErrPath</PropertyName>
+                <PropertyName>ResultPath</PropertyName>
               </ListItem>
             </ListItems>
           </ListEntry>

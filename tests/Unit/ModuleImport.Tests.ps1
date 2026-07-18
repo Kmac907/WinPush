@@ -94,9 +94,9 @@ Describe 'WinPush module import foundation' {
             Logs              = @()
             RunDirectory      = 'C:\WinPush\20260716-100000'
             ComputerDirectory = 'C:\WinPush\20260716-100000\PC01'
-            ResultPath        = 'C:\WinPush\20260716-100000\PC01\result.txt'
-            StdOutPath        = 'C:\WinPush\20260716-100000\PC01\stdout.txt'
-            StdErrPath        = 'C:\WinPush\20260716-100000\PC01\stderr.txt'
+            ResultPath        = 'C:\WinPush\20260716-100000\PC01\run.log'
+            StdOutPath        = $null
+            StdErrPath        = $null
             CopiedLogPaths    = @()
         }
 
@@ -109,10 +109,10 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'OutputPreview'
         $formatted | Should Match 'captured remote output'
         $formatted | Should Match 'ErrorMessage'
-        $formatted | Should Match 'StdOutPath'
-        $formatted | Should Match 'stdout.txt'
-        $formatted | Should Match 'StdErrPath'
-        $formatted | Should Match 'stderr.txt'
+        $formatted | Should Match 'ResultPath'
+        $formatted | Should Match 'run.log'
+        $formatted | Should Not Match 'StdOutPath'
+        $formatted | Should Not Match 'StdErrPath'
         $formatted | Should Not Match 'Transport'
         $formatted | Should Not Match 'ComputerDirectory'
     }

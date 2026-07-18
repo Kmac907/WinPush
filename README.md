@@ -228,20 +228,18 @@ WinPush public commands return structured PowerShell objects with `PSTypeName = 
 | `CopiedLogPaths` | `string[]` | Local paths for successfully copied logs. |
 | `RunDirectory` | `string` | Shared local run directory when artifacts are written. |
 | `ComputerDirectory` | `string` | Per-target local artifact directory when artifacts are written. |
-| `ResultPath` | `string` | Local `result.txt` path when captured output artifacts are written. |
-| `StdOutPath` | `string` | Local `stdout.txt` path when captured output artifacts are written. |
-| `StdErrPath` | `string` | Local `stderr.txt` path when captured output artifacts are written. |
+| `ResultPath` | `string` | Local per-target `run.log` path when captured output artifacts are written. |
+| `StdOutPath` | `string` | Reserved for optional separate stdout diagnostics; blank for the default artifact contract. |
+| `StdErrPath` | `string` | Reserved for optional separate stderr diagnostics; blank for the default artifact contract. |
 
-Default formatting displays `OutputPreview`, which is the last item in `Output`. When `-CaptureOutput` writes output files, default formatting also displays `StdOutPath` and `StdErrPath`.
+Default formatting displays `OutputPreview`, which is the last item in `Output`. When `-CaptureOutput` writes output files, default formatting also displays `ResultPath`.
 
 Generated files, logs, reports, or receipts:
 
 | Artifact | Location | Purpose | Retention |
 | --- | --- | --- | --- |
 | Run summary | `<OutputRoot>\<timestamp>\summary.csv` | Run-level CSV summary for captured command or script output. | Operator controlled. |
-| Per-target result | `<OutputRoot>\<timestamp>\<ComputerName>\result.txt` | Human-readable per-target result detail. | Operator controlled. |
-| Per-target output | `<OutputRoot>\<timestamp>\<ComputerName>\stdout.txt` | Captured output stream content. | Operator controlled. |
-| Per-target errors | `<OutputRoot>\<timestamp>\<ComputerName>\stderr.txt` | Captured error stream content. | Operator controlled. |
+| Per-target run log | `<OutputRoot>\<timestamp>\<ComputerName>\run.log` | Human-readable per-target status, command/script identity, output, and errors. | Operator controlled. |
 | Copied logs | `<OutputRoot>\<timestamp>\<ComputerName>\Logs\` | Immediate files copied from documented remote log directories. | Operator controlled. |
 
 This module does not write generated runtime output back into the repository.
