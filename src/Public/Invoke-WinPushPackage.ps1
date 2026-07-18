@@ -1,3 +1,37 @@
+function Add-WinPushPackageCaptureOutputArtifact {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [psobject] $Result,
+
+        [Parameter(Mandatory)]
+        [string] $OutputRoot,
+
+        [Parameter(Mandatory)]
+        [string] $ArtifactIdentity
+    )
+
+    $artifact = Write-WinPushCommandOutputArtifact `
+        -OutputRoot $OutputRoot `
+        -ComputerName $Result.ComputerName `
+        -Output $Result.Output `
+        -Errors $Result.Errors `
+        -Operation $Result.Operation `
+        -Transport $Result.Transport `
+        -ArtifactIdentity $ArtifactIdentity `
+        -Succeeded $Result.Succeeded `
+        -ExitCode $Result.ExitCode `
+        -ErrorMessage $Result.ErrorMessage
+
+    $Result.RunDirectory = $artifact.RunDirectory
+    $Result.ComputerDirectory = $artifact.ComputerDirectory
+    $Result.ResultPath = $artifact.ResultPath
+    $Result.StdOutPath = $artifact.StdOutPath
+    $Result.StdErrPath = $artifact.StdErrPath
+
+    $Result
+}
+
 function Invoke-WinPushPackage {
     [CmdletBinding(DefaultParameterSetName = 'PathComputerName')]
     param(
@@ -74,10 +108,6 @@ function Invoke-WinPushPackage {
             throw [System.NotSupportedException]::new('HostFile package target input is not supported until roadmap item 11.11.')
         }
 
-        if ($CaptureOutput) {
-            throw [System.NotSupportedException]::new('CaptureOutput is not supported until roadmap item 11.8.')
-        }
-
         if ($Logs) {
             throw [System.NotSupportedException]::new('Logs is not supported until roadmap item 11.9.')
         }
@@ -152,7 +182,7 @@ function Invoke-WinPushPackage {
                     -ExecutionEnded $executionEnded `
                     -CleanupPolicy $Cleanup
 
-                New-WinPushExecutionResult `
+                $result = New-WinPushExecutionResult `
                     -ComputerName $target `
                     -Transport 'Psrp' `
                     -Operation 'RunPackage' `
@@ -162,6 +192,15 @@ function Invoke-WinPushPackage {
                     -Output $output `
                     -Errors $errors `
                     -PackageMetadata $metadata
+
+                if ($CaptureOutput) {
+                    $result = Add-WinPushPackageCaptureOutputArtifact `
+                        -Result $result `
+                        -OutputRoot $OutputRoot `
+                        -ArtifactIdentity ('Uri: {0}; EntryPoint: {1}' -f $Uri.OriginalString, $EntryPoint)
+                }
+
+                $result
             }
             catch {
                 if ($null -ne $executionStarted -and $null -eq $executionEnded) {
@@ -197,7 +236,7 @@ function Invoke-WinPushPackage {
                 }
 
                 $resultComputerName = if ([string]::IsNullOrWhiteSpace($target)) { [string] $ComputerName } else { $target }
-                New-WinPushExecutionResult `
+                $result = New-WinPushExecutionResult `
                     -ComputerName $resultComputerName `
                     -Transport 'Psrp' `
                     -Operation 'RunPackage' `
@@ -206,6 +245,15 @@ function Invoke-WinPushPackage {
                     -ErrorMessage $errorMessage `
                     -Errors $errorMessage `
                     -PackageMetadata $metadata
+
+                if ($CaptureOutput -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
+                    $result = Add-WinPushPackageCaptureOutputArtifact `
+                        -Result $result `
+                        -OutputRoot $OutputRoot `
+                        -ArtifactIdentity ('Uri: {0}; EntryPoint: {1}' -f $Uri.OriginalString, $EntryPoint)
+                }
+
+                $result
             }
             finally {
                 if ($null -ne $session) {
@@ -294,7 +342,7 @@ function Invoke-WinPushPackage {
                 -ExecutionEnded $executionEnded `
                 -CleanupPolicy $Cleanup
 
-            New-WinPushExecutionResult `
+            $result = New-WinPushExecutionResult `
                 -ComputerName $target `
                 -Transport 'Psrp' `
                 -Operation 'RunPackage' `
@@ -304,6 +352,15 @@ function Invoke-WinPushPackage {
                 -Output $output `
                 -Errors $errors `
                 -PackageMetadata $metadata
+
+            if ($CaptureOutput) {
+                $result = Add-WinPushPackageCaptureOutputArtifact `
+                    -Result $result `
+                    -OutputRoot $OutputRoot `
+                    -ArtifactIdentity ('Path: {0}; EntryPoint: {1}' -f $resolvedPackagePath, $EntryPoint)
+            }
+
+            $result
         }
         catch {
             if ($null -ne $executionStarted -and $null -eq $executionEnded) {
@@ -333,7 +390,7 @@ function Invoke-WinPushPackage {
             }
 
             $resultComputerName = if ([string]::IsNullOrWhiteSpace($target)) { [string] $ComputerName } else { $target }
-            New-WinPushExecutionResult `
+            $result = New-WinPushExecutionResult `
                 -ComputerName $resultComputerName `
                 -Transport 'Psrp' `
                 -Operation 'RunPackage' `
@@ -342,6 +399,15 @@ function Invoke-WinPushPackage {
                 -ErrorMessage $errorMessage `
                 -Errors $errorMessage `
                 -PackageMetadata $metadata
+
+            if ($CaptureOutput -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
+                $result = Add-WinPushPackageCaptureOutputArtifact `
+                    -Result $result `
+                    -OutputRoot $OutputRoot `
+                    -ArtifactIdentity ('Path: {0}; EntryPoint: {1}' -f $resolvedPackagePath, $EntryPoint)
+            }
+
+            $result
         }
         finally {
             if ($null -ne $session) {

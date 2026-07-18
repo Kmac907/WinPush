@@ -9,7 +9,7 @@
 | `Invoke-WinPushScript` | Runs one existing local `.ps1` file on direct `-ComputerName`, pipeline, pipeline-by-property-name `ComputerName`, or `-HostFile` targets. PSRP uses `Invoke-Command -FilePath`. WinRM and PsExec stage the script through the selected native transport and execute the staged file through remote Windows PowerShell. |
 | `Copy-WinPushItem` | Uploads one existing local file to one target through `Copy-Item -ToSession`, or downloads one remote file through `Copy-Item -FromSession` when `-Direction Download` is supplied. |
 | `Get-WinPushLog` | Copies immediate regular files from one explicit absolute remote Windows directory to the target's local `Logs` folder under a timestamped output run folder. |
-| `Invoke-WinPushPackage` | Stages one local package file or directory to one target through PSRP, or downloads one URI package to the local admin-workstation cache, stages the cached package to one target, optionally extracts staged `.zip` packages on the endpoint, runs one package-relative PowerShell `.ps1` entry point, and returns `RunPackage` metadata. Later package slices add artifacts, logs, cleanup, and multi-target workflows. |
+| `Invoke-WinPushPackage` | Stages one local package file or directory to one target through PSRP, or downloads one URI package to the local admin-workstation cache, stages the cached package to one target, optionally extracts staged `.zip` packages on the endpoint, runs one package-relative PowerShell `.ps1` entry point, optionally writes captured package output artifacts, and returns `RunPackage` metadata. Later package slices add logs, cleanup, and multi-target workflows. |
 
 ## Parameters
 
@@ -84,7 +84,7 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 
 ### `Invoke-WinPushPackage`
 
-Current package support stages one existing local package file or directory to one resolved target through PSRP. Directory packages are staged recursively beneath one remote package root while preserving package-relative file layout. URI package sources are downloaded to the local admin-workstation cache, then the cached package file is staged to the same kind of remote package path as a local file package. When `-Extract` is supplied with a staged `.zip` package, the endpoint extracts the archive into the package staging directory and sets `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root, runs one package-relative PowerShell `.ps1` entry point, retains entry-point output and errors in the returned result, and records execution timestamps in `PackageMetadata`. Later package workflow slices add output artifacts, logs, cleanup, host-file targets, and multi-target target sources.
+Current package support stages one existing local package file or directory to one resolved target through PSRP. Directory packages are staged recursively beneath one remote package root while preserving package-relative file layout. URI package sources are downloaded to the local admin-workstation cache, then the cached package file is staged to the same kind of remote package path as a local file package. When `-Extract` is supplied with a staged `.zip` package, the endpoint extracts the archive into the package staging directory and sets `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root, runs one package-relative PowerShell `.ps1` entry point, retains entry-point output and errors in the returned result, records execution timestamps in `PackageMetadata`, and writes package `summary.csv` plus per-target `run.log` artifacts when `-CaptureOutput` is supplied. Later package workflow slices add logs, cleanup, host-file targets, and multi-target target sources.
 
 | Parameter | Argument | Notes |
 | --- | --- | --- |
@@ -94,7 +94,7 @@ Current package support stages one existing local package file or directory to o
 | `-Uri` | `uri` | Absolute remote package source downloaded to the admin-workstation cache before endpoint staging. Mutually exclusive with `-Path`. |
 | `-EntryPoint` | `string` | PowerShell `.ps1` package entry point relative to the staged package root. Required. |
 | `-Extract` | switch | Extracts staged `.zip` package files on the endpoint into the package staging directory. Non-zip files and directory packages are rejected. |
-| `-CaptureOutput` | switch | Planned package `summary.csv` and per-target `run.log` artifact capture. Currently rejected. |
+| `-CaptureOutput` | switch | Writes one run-level `summary.csv` and one per-target `run.log` for package output and errors. |
 | `-Logs` | switch | Planned package log/result copy. Currently rejected. |
 | `-Cleanup` | `Never`, `OnSuccess`, `Always` | Planned remote staging cleanup policy. Defaults to `Never`; values other than `Never` are currently rejected. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
@@ -169,7 +169,7 @@ Command and script behavior is determined by caller-supplied command text or scr
 
 - PowerShell 7.6 `Core` is the supported controller shell.
 - Windows PowerShell 5.1 compatibility is not guaranteed.
-- `Invoke-WinPushPackage` currently stages one local file or directory package to one resolved target, or downloads one absolute URI package to the local cache before staging the cached file to one resolved target. It can extract staged `.zip` package files on the endpoint with `-Extract` and runs one package-relative PowerShell `.ps1` entry point from the staged or extracted package root. Output capture artifacts, log copy, cleanup policies other than `Never`, host-file targets, and multi-target package workflows are not implemented yet.
+- `Invoke-WinPushPackage` currently stages one local file or directory package to one resolved target, or downloads one absolute URI package to the local cache before staging the cached file to one resolved target. It can extract staged `.zip` package files on the endpoint with `-Extract`, runs one package-relative PowerShell `.ps1` entry point from the staged or extracted package root, and writes package output artifacts when `-CaptureOutput` is supplied. Log copy, cleanup policies other than `Never`, host-file targets, and multi-target package workflows are not implemented yet.
 - SSH transport, retries, parallel fan-out, persistent sessions, and transport fallback are not implemented.
 - Automatic WinRM, firewall, TrustedHosts, certificate, endpoint, or policy configuration is not implemented.
 - Recursive file transfer, recursive log enumeration, and multi-target file transfer are not implemented.

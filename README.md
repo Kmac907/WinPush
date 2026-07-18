@@ -238,8 +238,8 @@ Generated files, logs, reports, or receipts:
 
 | Artifact | Location | Purpose | Retention |
 | --- | --- | --- | --- |
-| Run summary | `<OutputRoot>\<timestamp>\summary.csv` | Run-level CSV summary for captured command or script output. | Operator controlled. |
-| Per-target run log | `<OutputRoot>\<timestamp>\<ComputerName>\run.log` | Human-readable per-target status, command/script identity, output, and errors. | Operator controlled. |
+| Run summary | `<OutputRoot>\<timestamp>\summary.csv` | Run-level CSV summary for captured command, script, or package output. | Operator controlled. |
+| Per-target run log | `<OutputRoot>\<timestamp>\<ComputerName>\run.log` | Human-readable per-target status, command/script/package identity, output, and errors. | Operator controlled. |
 | Copied logs | `<OutputRoot>\<timestamp>\<ComputerName>\Logs\` | Immediate files copied from documented remote log directories. | Operator controlled. |
 
 This module does not write generated runtime output back into the repository.

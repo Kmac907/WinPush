@@ -67,9 +67,9 @@ Additional cleanup:
 
 ## Package Workflow
 
-`Invoke-WinPushPackage` currently stages one existing local package file or directory from the admin workstation to one resolved target through PSRP. It creates a remote staging directory under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It can also download one absolute URI package to the admin-workstation cache, then upload the cached package file to one resolved target through PSRP. When `-Extract` is supplied with a staged `.zip` package, the endpoint extracts the archive into the package staging directory and returns `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root and runs one package-relative PowerShell `.ps1` entry point. It returns a `WinPush.ExecutionResult` with `Operation = RunPackage`.
+`Invoke-WinPushPackage` currently stages one existing local package file or directory from the admin workstation to one resolved target through PSRP. It creates a remote staging directory under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It can also download one absolute URI package to the admin-workstation cache, then upload the cached package file to one resolved target through PSRP. When `-Extract` is supplied with a staged `.zip` package, the endpoint extracts the archive into the package staging directory and returns `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root and runs one package-relative PowerShell `.ps1` entry point. When `-CaptureOutput` is supplied, package entry-point output and errors are written to the same local artifact shape as command and script execution: one run-level `summary.csv` and one per-target `run.log`. It returns a `WinPush.ExecutionResult` with `Operation = RunPackage`.
 
-Later package workflow slices add output capture, log/result copy, cleanup policy, multi-target target sources, and live package validation.
+Later package workflow slices add log/result copy, cleanup policy, multi-target target sources, and live package validation.
 
 Package workflow results carry `PackageMetadata` on the returned `WinPush.ExecutionResult`. The metadata shape is:
 
@@ -126,6 +126,17 @@ Invoke-WinPushPackage `
     -Extract
 ```
 
+Package workflow with captured output artifacts:
+
+```powershell
+Invoke-WinPushPackage `
+    -ComputerName PC01 `
+    -Uri 'https://storage.blob.core.windows.net/packages/EA.zip' `
+    -EntryPoint .\Install-EA.ps1 `
+    -Extract `
+    -CaptureOutput
+```
+
 Planned package workflow with artifacts, logs, and cleanup:
 
 ```powershell
@@ -139,7 +150,7 @@ Invoke-WinPushPackage `
     -Cleanup Always
 ```
 
-When package `-CaptureOutput` is implemented, it is planned to use the same local artifact shape as command and script execution: one run-level `summary.csv` and one per-target `run.log`.
+Package `-CaptureOutput` uses the same local artifact shape as command and script execution: one run-level `summary.csv` and one per-target `run.log`. The returned result keeps package output and errors in memory, populates `ResultPath` with `run.log`, and leaves `StdOutPath` and `StdErrPath` blank by default.
 
 Defaults:
 
@@ -157,6 +168,7 @@ Current limitations:
 - One package-relative PowerShell `.ps1` entry point is executed from the staged or extracted package root.
 - Rooted entry-point paths, parent traversal, empty path segments, and non-`.ps1` entry points are rejected before execution.
 - Package entry-point output and errors are retained in the returned `WinPush.ExecutionResult`.
+- `-CaptureOutput` writes one run-level `summary.csv` and one per-target `run.log` for returned package results.
 - URI packages are downloaded only by the admin workstation, then uploaded to endpoints through PSRP.
-- `-CaptureOutput`, `-Logs`, and cleanup policies other than `Never` are rejected.
+- `-Logs` and cleanup policies other than `Never` are rejected.
 - `-HostFile` and multi-target package workflows are rejected until the target-source package slice is implemented.

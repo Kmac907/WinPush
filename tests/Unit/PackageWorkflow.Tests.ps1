@@ -4,6 +4,7 @@ $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\P
 $script:PackageInfoPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushPackageInfo.ps1'
 $script:PsrpCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Copy-WinPushPsrpItem.ps1'
 $script:PackageStagePath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\New-WinPushPackageStagePlan.ps1'
+$script:ArtifactWriterPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
 $script:PackageCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Public\Invoke-WinPushPackage.ps1'
 
 . $script:ResolverPath
@@ -11,6 +12,7 @@ $script:PackageCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\
 . $script:PackageInfoPath
 . $script:PsrpCopyPath
 . $script:PackageStagePath
+. $script:ArtifactWriterPath
 . $script:PackageCommandPath
 
 function Get-TestCredential {
@@ -103,8 +105,6 @@ Describe 'Invoke-WinPushPackage contract' {
             Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
         { Invoke-WinPushPackage -HostFile '.\hosts.txt' -Uri 'https://storage.contoso.example/packages/EA.zip' -EntryPoint '.\Install-EA.ps1' } |
             Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
-        { Invoke-WinPushPackage -ComputerName 'PC-001' -Path $packagePath -EntryPoint '.\Install-EA.ps1' -CaptureOutput } |
-            Should Throw 'CaptureOutput is not supported until roadmap item 11.8.'
         { Invoke-WinPushPackage -ComputerName 'PC-001' -Path $packagePath -EntryPoint '.\Install-EA.ps1' -Logs } |
             Should Throw 'Logs is not supported until roadmap item 11.9.'
         { Invoke-WinPushPackage -ComputerName 'PC-001' -Path $packagePath -EntryPoint '.\Install-EA.ps1' -Cleanup Always } |
@@ -307,9 +307,59 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         @($result.Output).Count | Should Be 1
         $result.Output[0] | Should Be 'package output'
         @($result.Errors).Count | Should Be 0
+        $result.RunDirectory | Should BeNullOrEmpty
+        $result.ComputerDirectory | Should BeNullOrEmpty
+        $result.ResultPath | Should BeNullOrEmpty
+        $result.StdOutPath | Should BeNullOrEmpty
+        $result.StdErrPath | Should BeNullOrEmpty
         @($script:PackageExecutionRoots).Count | Should Be 1
         $script:PackageExecutionRoots[0] | Should Be $script:RemoteDirectoriesCreated[0]
         $script:PackageExecutionEntryPoints[0] | Should Be '.\Install-EA.ps1'
+    }
+
+    It 'writes summary and run log artifacts for successful package capture output' {
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'PackageArtifacts'
+        $result = Invoke-WinPushPackage `
+            -ComputerName ' PC-001 ' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -CaptureOutput `
+            -OutputRoot $outputRoot
+        $resolvedPackagePath = (Get-Item -LiteralPath $script:FixtureScriptPackage).FullName
+
+        $result.Succeeded | Should Be $true
+        $result.Output[0] | Should Be 'package output'
+        $result.RunDirectory | Should Match ([regex]::Escape($outputRoot))
+        $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'run.log')
+        $result.StdOutPath | Should BeNullOrEmpty
+        $result.StdErrPath | Should BeNullOrEmpty
+        Test-Path -LiteralPath $result.ResultPath | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv') | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt') | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt') | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt') | Should Be $false
+
+        $summary = @(Import-Csv -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'))
+        @($summary).Count | Should Be 1
+        $summary[0].ComputerName | Should Be 'PC-001'
+        $summary[0].Operation | Should Be 'RunPackage'
+        $summary[0].Transport | Should Be 'Psrp'
+        $summary[0].Succeeded | Should Be 'True'
+        $summary[0].ExitCode | Should Be '0'
+        $summary[0].ResultPath | Should Be $result.ResultPath
+        $summary[0].StdOutPath | Should Be ''
+        $summary[0].StdErrPath | Should Be ''
+
+        $runLog = Get-Content -LiteralPath $result.ResultPath -Raw
+        $runLog | Should Match ([regex]::Escape('Operation    : RunPackage'))
+        $runLog | Should Match ([regex]::Escape('Transport    : Psrp'))
+        $runLog | Should Match ([regex]::Escape("Identity     : Path: $resolvedPackagePath; EntryPoint: .\Install-EA.ps1"))
+        $runLog | Should Match ([regex]::Escape('Succeeded    : True'))
+        $runLog | Should Match ([regex]::Escape('ExitCode     : 0'))
+        $runLog | Should Match ([regex]::Escape('Output:'))
+        $runLog | Should Match ([regex]::Escape('package output'))
+        $runLog | Should Match ([regex]::Escape('Errors:'))
     }
 
     It 'returns a failed package result when the PowerShell entry point fails without discarding output' {
@@ -331,6 +381,47 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }
 
+    It 'writes summary and run log artifacts for captured package errors' {
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'PackageErrorArtifacts'
+        $script:PackageExecutionOutput = @('started package work')
+        $script:PackageExecutionErrors = @('entry point failed')
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -CaptureOutput `
+            -OutputRoot $outputRoot
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'entry point failed'
+        $result.Output[0] | Should Be 'started package work'
+        $result.Errors[0] | Should Be 'entry point failed'
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'run.log')
+        $result.StdOutPath | Should BeNullOrEmpty
+        $result.StdErrPath | Should BeNullOrEmpty
+        Test-Path -LiteralPath $result.ResultPath | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv') | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt') | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt') | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt') | Should Be $false
+
+        $summary = @(Import-Csv -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'))
+        @($summary).Count | Should Be 1
+        $summary[0].Succeeded | Should Be 'False'
+        $summary[0].ExitCode | Should Be '1'
+        $summary[0].ErrorMessage | Should Be 'entry point failed'
+        $summary[0].ResultPath | Should Be $result.ResultPath
+
+        $runLog = Get-Content -LiteralPath $result.ResultPath -Raw
+        $runLog | Should Match ([regex]::Escape('Succeeded    : False'))
+        $runLog | Should Match ([regex]::Escape('ExitCode     : 1'))
+        $runLog | Should Match ([regex]::Escape('ErrorMessage : entry point failed'))
+        $runLog | Should Match ([regex]::Escape('started package work'))
+        $runLog | Should Match ([regex]::Escape('entry point failed'))
+    }
+
     It 'returns a failed package result when entry point invocation fails and removes the session' {
         $script:PackageExecutionError = 'entry point invocation failed'
 
@@ -344,6 +435,41 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $null -eq $result.PackageMetadata.ExecutionEnded | Should Be $false
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'writes summary and run log artifacts when captured entry point invocation throws' {
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'PackageInvocationErrorArtifacts'
+        $script:PackageExecutionError = 'entry point invocation failed'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -CaptureOutput `
+            -OutputRoot $outputRoot
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'entry point invocation failed'
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'run.log')
+        $result.StdOutPath | Should BeNullOrEmpty
+        $result.StdErrPath | Should BeNullOrEmpty
+        Test-Path -LiteralPath $result.ResultPath | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv') | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt') | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt') | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt') | Should Be $false
+
+        $summary = @(Import-Csv -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'))
+        @($summary).Count | Should Be 1
+        $summary[0].Succeeded | Should Be 'False'
+        $summary[0].ExitCode | Should Be '1'
+        $summary[0].ErrorMessage | Should Be 'entry point invocation failed'
+
+        $runLog = Get-Content -LiteralPath $result.ResultPath -Raw
+        $runLog | Should Match ([regex]::Escape('Operation    : RunPackage'))
+        $runLog | Should Match ([regex]::Escape('Succeeded    : False'))
+        $runLog | Should Match ([regex]::Escape('entry point invocation failed'))
     }
 
     It 'extracts one staged local zip package on the endpoint and returns extracted metadata' {
@@ -488,6 +614,42 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         @($script:CopiedPaths).Count | Should Be 0
     }
 
+    It 'writes summary and run log artifacts for captured session failures' {
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'PackageSessionFailureArtifacts'
+        $script:NewPSSessionError = 'package session failed'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixturePackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -CaptureOutput `
+            -OutputRoot $outputRoot
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'package session failed'
+        $result.RunDirectory | Should Match ([regex]::Escape($outputRoot))
+        $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'run.log')
+        $result.StdOutPath | Should BeNullOrEmpty
+        $result.StdErrPath | Should BeNullOrEmpty
+        Test-Path -LiteralPath $result.ResultPath | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv') | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'result.txt') | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt') | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt') | Should Be $false
+
+        $summary = @(Import-Csv -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'))
+        @($summary).Count | Should Be 1
+        $summary[0].Succeeded | Should Be 'False'
+        $summary[0].ExitCode | Should Be '1'
+        $summary[0].ErrorMessage | Should Be 'package session failed'
+
+        $runLog = Get-Content -LiteralPath $result.ResultPath -Raw
+        $runLog | Should Match ([regex]::Escape('Operation    : RunPackage'))
+        $runLog | Should Match ([regex]::Escape('Succeeded    : False'))
+        $runLog | Should Match ([regex]::Escape('package session failed'))
+    }
+
     It 'returns a failed package result when remote staging directory creation fails and removes the session' {
         $script:RemoteDirectoryError = 'remote staging directory failed'
 
@@ -592,6 +754,41 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:PackageExecutionRoots[0] | Should Be $script:RemoteDirectoriesCreated[0]
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'writes summary and run log artifacts for cached URI package capture output' {
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'UriPackageArtifacts'
+        $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCacheArtifacts'
+        $uri = 'https://storage.contoso.example/packages/Install-EA.ps1'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName ' PC-001 ' `
+            -Uri $uri `
+            -EntryPoint '.\Install-EA.ps1' `
+            -PackageCacheRoot $cacheRoot `
+            -CaptureOutput `
+            -OutputRoot $outputRoot
+
+        $result.Succeeded | Should Be $true
+        $result.Output[0] | Should Be 'package output'
+        $result.RunDirectory | Should Match ([regex]::Escape($outputRoot))
+        $result.ResultPath | Should Be (Join-Path -Path $result.ComputerDirectory -ChildPath 'run.log')
+        $result.StdOutPath | Should BeNullOrEmpty
+        $result.StdErrPath | Should BeNullOrEmpty
+        Test-Path -LiteralPath $result.ResultPath | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv') | Should Be $true
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stdout.txt') | Should Be $false
+        Test-Path -LiteralPath (Join-Path -Path $result.ComputerDirectory -ChildPath 'stderr.txt') | Should Be $false
+
+        $summary = @(Import-Csv -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'))
+        @($summary).Count | Should Be 1
+        $summary[0].ComputerName | Should Be 'PC-001'
+        $summary[0].Operation | Should Be 'RunPackage'
+        $summary[0].ResultPath | Should Be $result.ResultPath
+
+        $runLog = Get-Content -LiteralPath $result.ResultPath -Raw
+        $runLog | Should Match ([regex]::Escape("Identity     : Uri: $uri; EntryPoint: .\Install-EA.ps1"))
+        $runLog | Should Match ([regex]::Escape('package output'))
     }
 
     It 'extracts one staged cached URI zip package on the endpoint and returns extracted metadata' {
