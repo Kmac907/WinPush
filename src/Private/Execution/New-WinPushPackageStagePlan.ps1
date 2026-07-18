@@ -154,3 +154,34 @@ function Invoke-WinPushPsrpPackageStage {
         -Destination $StagePlan.RemotePackagePath `
         -Direction Upload
 }
+
+function Invoke-WinPushPsrpPackageExtract {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object] $Session,
+
+        [Parameter(Mandatory)]
+        [object] $StagePlan
+    )
+
+    if ($StagePlan.IsDirectory -or [System.IO.Path]::GetExtension([string] $StagePlan.PackageFileName) -ne '.zip') {
+        throw [System.ArgumentException]::new('Extract requires a staged .zip package file.')
+    }
+
+    $null = Invoke-Command `
+        -Session $Session `
+        -ScriptBlock {
+            $archivePath = [string] $args[0]
+            $destinationPath = [string] $args[1]
+
+            if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
+                throw [System.IO.FileNotFoundException]::new("Staged zip package was not found: $archivePath")
+            }
+
+            [System.IO.Directory]::CreateDirectory($destinationPath) | Out-Null
+            Expand-Archive -LiteralPath $archivePath -DestinationPath $destinationPath -Force -ErrorAction Stop
+        } `
+        -ArgumentList $StagePlan.RemotePackagePath, $StagePlan.RemoteDirectory `
+        -ErrorAction Stop
+}

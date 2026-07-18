@@ -90,8 +90,6 @@ Describe 'Invoke-WinPushPackage contract' {
             Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
         { Invoke-WinPushPackage -HostFile '.\hosts.txt' -Uri 'https://storage.contoso.example/packages/EA.zip' -EntryPoint '.\Install-EA.ps1' } |
             Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
-        { Invoke-WinPushPackage -ComputerName 'PC-001' -Path $packagePath -EntryPoint '.\Install-EA.ps1' -Extract } |
-            Should Throw 'Extract is not supported until roadmap item 11.6.'
         { Invoke-WinPushPackage -ComputerName 'PC-001' -Path $packagePath -EntryPoint '.\Install-EA.ps1' -CaptureOutput } |
             Should Throw 'CaptureOutput is not supported until roadmap item 11.8.'
         { Invoke-WinPushPackage -ComputerName 'PC-001' -Path $packagePath -EntryPoint '.\Install-EA.ps1' -Logs } |
@@ -107,6 +105,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:NewPSSessionCredentialSupplied = @()
         $script:NewPSSessionCredentials = @()
         $script:RemoteDirectoriesCreated = @()
+        $script:RemoteExtractions = @()
         $script:CopiedSessions = @()
         $script:CopiedPaths = @()
         $script:CopiedDestinations = @()
@@ -119,6 +118,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         )
         $script:NewPSSessionError = $null
         $script:RemoteDirectoryError = $null
+        $script:RemoteExtractionError = $null
         $script:CopyError = $null
         $script:DownloadError = $null
         $script:FixturePackage = Join-Path -Path $TestDrive -ChildPath 'Package.zip'
@@ -158,6 +158,20 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $null = $Session
         $null = $ScriptBlock
         $null = $ErrorAction
+
+        if (@($ArgumentList).Count -ge 2) {
+            $script:RemoteExtractions += [pscustomobject] @{
+                ArchivePath     = [string] $ArgumentList[0]
+                DestinationPath = [string] $ArgumentList[1]
+            }
+
+            if ($null -ne $script:RemoteExtractionError) {
+                throw $script:RemoteExtractionError
+            }
+
+            return
+        }
+
         $script:RemoteDirectoriesCreated += [string] $ArgumentList[0]
         if ($null -ne $script:RemoteDirectoryError) {
             throw $script:RemoteDirectoryError
@@ -246,6 +260,69 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.PackageMetadata.CleanupSucceeded | Should BeNullOrEmpty
         $result.PackageMetadata.LogsCopied | Should Be $false
         $result.Output[0].RemoteStagePath | Should Be $result.PackageMetadata.RemoteStagePath
+    }
+
+    It 'extracts one staged local zip package on the endpoint and returns extracted metadata' {
+        $result = Invoke-WinPushPackage -ComputerName ' PC-001 ' -Path $script:FixturePackage -EntryPoint '.\Install-EA.ps1' -Extract
+        $resolvedPackagePath = (Get-Item -LiteralPath $script:FixturePackage).FullName
+
+        $result.Succeeded | Should Be $true
+        $result.Operation | Should Be 'RunPackage'
+        @($script:RemoteDirectoriesCreated).Count | Should Be 1
+        @($script:CopiedPaths).Count | Should Be 1
+        $script:CopiedPaths[0] | Should Be $resolvedPackagePath
+        @($script:RemoteExtractions).Count | Should Be 1
+        $script:RemoteExtractions[0].ArchivePath | Should Be $script:CopiedDestinations[0]
+        $script:RemoteExtractions[0].DestinationPath | Should Be $script:RemoteDirectoriesCreated[0]
+        $result.PackageMetadata.Extracted | Should Be $true
+        $result.PackageMetadata.RemoteStagePath | Should Be $script:RemoteDirectoriesCreated[0]
+        $result.Output[0].Extracted | Should Be $true
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'returns a failed package result when local zip extraction fails and removes the session' {
+        $script:RemoteExtractionError = 'remote zip extraction failed'
+
+        $result = Invoke-WinPushPackage -ComputerName 'PC-001' -Path $script:FixturePackage -EntryPoint '.\Install-EA.ps1' -Extract
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'remote zip extraction failed'
+        @($script:RemoteExtractions).Count | Should Be 1
+        $result.PackageMetadata.Extracted | Should Be $false
+        $result.PackageMetadata.RemoteStagePath | Should Be $script:CopiedDestinations[0]
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'rejects Extract for local non-zip packages before opening a session' {
+        $packagePath = Join-Path -Path $TestDrive -ChildPath 'Package.txt'
+        Set-Content -LiteralPath $packagePath -Value 'package' -Encoding utf8NoBOM
+
+        $result = Invoke-WinPushPackage -ComputerName 'PC-001' -Path $packagePath -EntryPoint '.\Install-EA.ps1' -Extract
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'Extract requires a staged .zip package file.'
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemoteDirectoriesCreated).Count | Should Be 0
+        @($script:CopiedPaths).Count | Should Be 0
+        @($script:RemoteExtractions).Count | Should Be 0
+    }
+
+    It 'rejects Extract for local directory packages before opening a session' {
+        $directoryPath = Join-Path -Path $TestDrive -ChildPath 'PackageDirectoryExtractRejection'
+        New-Item -ItemType Directory -Path $directoryPath | Out-Null
+        Set-Content -LiteralPath (Join-Path -Path $directoryPath -ChildPath 'Install-EA.ps1') -Value 'Write-Output package' -Encoding utf8NoBOM
+
+        $result = Invoke-WinPushPackage -ComputerName 'PC-001' -Path $directoryPath -EntryPoint '.\Install-EA.ps1' -Extract
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'Extract requires a staged .zip package file.'
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemoteDirectoriesCreated).Count | Should Be 0
+        @($script:CopiedPaths).Count | Should Be 0
+        @($script:RemoteExtractions).Count | Should Be 0
     }
 
     It 'stages one local directory package to one target while preserving relative file layout' {
@@ -427,6 +504,67 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.Output[0].RemoteStagePath | Should Be $result.PackageMetadata.RemoteStagePath
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'extracts one staged cached URI zip package on the endpoint and returns extracted metadata' {
+        $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCacheExtract'
+        $uri = 'https://storage.contoso.example/packages/EA%20Install.zip'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName ' PC-001 ' `
+            -Uri $uri `
+            -EntryPoint '.\Install-EA.ps1' `
+            -PackageCacheRoot $cacheRoot `
+            -Extract
+
+        $result.Succeeded | Should Be $true
+        $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
+        $result.PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
+        $result.PackageMetadata.Extracted | Should Be $true
+        $result.PackageMetadata.RemoteStagePath | Should Be $script:RemoteDirectoriesCreated[0]
+        @($script:RemoteExtractions).Count | Should Be 1
+        $script:RemoteExtractions[0].ArchivePath | Should Be $script:CopiedDestinations[0]
+        $script:RemoteExtractions[0].DestinationPath | Should Be $script:RemoteDirectoriesCreated[0]
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'returns a failed URI package result when cached zip extraction fails and removes the session' {
+        $script:RemoteExtractionError = 'uri package extraction failed'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Extract
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'uri package extraction failed'
+        $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
+        $result.PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
+        $result.PackageMetadata.Extracted | Should Be $false
+        $result.PackageMetadata.RemoteStagePath | Should Be $script:CopiedDestinations[0]
+        @($script:RemoteExtractions).Count | Should Be 1
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'rejects Extract for URI non-zip packages before downloading or opening an endpoint session' {
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'https://storage.contoso.example/packages/EA.txt' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Extract
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'Extract requires a staged .zip package file.'
+        $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
+        $result.PackageMetadata.LocalPackagePath | Should Match ([regex]::Escape('EA.txt'))
+        $result.PackageMetadata.RemoteStagePath | Should BeNullOrEmpty
+        @($script:DownloadUris).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemoteExtractions).Count | Should Be 0
     }
 
     It 'returns a failed URI package result when download fails before opening an endpoint session' {

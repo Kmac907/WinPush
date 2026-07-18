@@ -148,7 +148,7 @@ ErrorMessage  :
 | `Invoke-WinPushScript` | Runs an existing local `.ps1` file on one or more targets through PSRP, WinRS, or PsExec. |
 | `Copy-WinPushItem` | Uploads or downloads one file through PSRP. |
 | `Get-WinPushLog` | Copies immediate files from an explicit remote log directory. |
-| `Invoke-WinPushPackage` | Stages one local package file or directory to one target through PSRP, or downloads one URI package to the local cache, stages the cached package to one target, and returns `RunPackage` metadata. |
+| `Invoke-WinPushPackage` | Stages one local package file or directory to one target through PSRP, or downloads one URI package to the local cache, stages the cached package to one target, optionally extracts staged `.zip` packages on the endpoint, and returns `RunPackage` metadata. |
 
 Command standards:
 

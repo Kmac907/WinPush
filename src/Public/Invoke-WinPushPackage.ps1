@@ -72,10 +72,6 @@ function Invoke-WinPushPackage {
             throw [System.NotSupportedException]::new('HostFile package target input is not supported until roadmap item 11.11.')
         }
 
-        if ($Extract) {
-            throw [System.NotSupportedException]::new('Extract is not supported until roadmap item 11.6.')
-        }
-
         if ($CaptureOutput) {
             throw [System.NotSupportedException]::new('CaptureOutput is not supported until roadmap item 11.8.')
         }
@@ -104,6 +100,10 @@ function Invoke-WinPushPackage {
 
                 $target = $targets[0]
                 $cachePlan = New-WinPushPackageCachePlan -Uri $Uri -PackageCacheRoot $PackageCacheRoot
+                if ($Extract -and [System.IO.Path]::GetExtension([string] $cachePlan.PackageFileName) -ne '.zip') {
+                    throw [System.ArgumentException]::new('Extract requires a staged .zip package file.')
+                }
+
                 $localPackagePath = Save-WinPushPackageUriToCache -Uri $Uri -CachePlan $cachePlan
                 $sessionParameters = @{
                     ComputerName = $target
@@ -118,13 +118,21 @@ function Invoke-WinPushPackage {
                 $session = New-PSSession @sessionParameters
                 $stagePlan = New-WinPushPackageStagePlan -RemoteStageRoot $RemoteStageRoot -PackagePath $localPackagePath
                 Invoke-WinPushPsrpPackageStage -Session $session -LocalPackagePath $localPackagePath -StagePlan $stagePlan
+                $remoteStagePath = $stagePlan.RemotePackagePath
+                $extracted = $false
+                if ($Extract) {
+                    Invoke-WinPushPsrpPackageExtract -Session $session -StagePlan $stagePlan
+                    $remoteStagePath = $stagePlan.RemoteDirectory
+                    $extracted = $true
+                }
 
                 $metadata = New-WinPushPackageInfo `
                     -PackageSourceType Uri `
                     -PackageSource $Uri.OriginalString `
                     -LocalPackagePath $localPackagePath `
-                    -RemoteStagePath $stagePlan.RemotePackagePath `
+                    -RemoteStagePath $remoteStagePath `
                     -EntryPoint $EntryPoint `
+                    -Extracted $extracted `
                     -CleanupPolicy $Cleanup
 
                 New-WinPushExecutionResult `
@@ -200,6 +208,10 @@ function Invoke-WinPushPackage {
 
             $resolvedPackagePath = $packageItem.FullName
             $packageIsDirectory = [bool] $packageItem.PSIsContainer
+            if ($Extract -and ($packageIsDirectory -or [System.IO.Path]::GetExtension($resolvedPackagePath) -ne '.zip')) {
+                throw [System.ArgumentException]::new('Extract requires a staged .zip package file.')
+            }
+
             $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
             if ($targets.Count -ne 1) {
                 throw [System.ArgumentException]::new('Invoke-WinPushPackage currently supports exactly one target until roadmap item 11.11.')
@@ -219,13 +231,21 @@ function Invoke-WinPushPackage {
             $session = New-PSSession @sessionParameters
             $stagePlan = New-WinPushPackageStagePlan -RemoteStageRoot $RemoteStageRoot -PackagePath $resolvedPackagePath -Directory:$packageIsDirectory
             Invoke-WinPushPsrpPackageStage -Session $session -LocalPackagePath $resolvedPackagePath -StagePlan $stagePlan
+            $remoteStagePath = $stagePlan.RemotePackagePath
+            $extracted = $false
+            if ($Extract) {
+                Invoke-WinPushPsrpPackageExtract -Session $session -StagePlan $stagePlan
+                $remoteStagePath = $stagePlan.RemoteDirectory
+                $extracted = $true
+            }
 
             $metadata = New-WinPushPackageInfo `
                 -PackageSourceType Path `
                 -PackageSource $resolvedPackagePath `
                 -LocalPackagePath $resolvedPackagePath `
-                -RemoteStagePath $stagePlan.RemotePackagePath `
+                -RemoteStagePath $remoteStagePath `
                 -EntryPoint $EntryPoint `
+                -Extracted $extracted `
                 -CleanupPolicy $Cleanup
 
             New-WinPushExecutionResult `
