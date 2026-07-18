@@ -77,6 +77,19 @@ Describe 'Invoke-WinPushPackage contract' {
             Should Throw 'EntryPoint must not be empty.'
     }
 
+    It 'rejects unsafe entry point paths before package workflow execution' {
+        { Invoke-WinPushPackage -ComputerName 'PC-001' -Path '.\Package.zip' -EntryPoint 'C:\Temp\Install-EA.ps1' } |
+            Should Throw 'EntryPoint must be relative to the staged package root.'
+        { Invoke-WinPushPackage -ComputerName 'PC-001' -Path '.\Package.zip' -EntryPoint '..\Install-EA.ps1' } |
+            Should Throw 'EntryPoint must not contain parent traversal.'
+        { Invoke-WinPushPackage -ComputerName 'PC-001' -Path '.\Package.zip' -EntryPoint 'tools\..\Install-EA.ps1' } |
+            Should Throw 'EntryPoint must not contain parent traversal.'
+        { Invoke-WinPushPackage -ComputerName 'PC-001' -Path '.\Package.zip' -EntryPoint 'tools\\Install-EA.ps1' } |
+            Should Throw 'EntryPoint must not contain empty path segments.'
+        { Invoke-WinPushPackage -ComputerName 'PC-001' -Path '.\Package.zip' -EntryPoint '.\Install-EA.cmd' } |
+            Should Throw 'EntryPoint must refer to a .ps1 file.'
+    }
+
     It 'rejects empty output roots before package workflow execution when artifacts are requested' {
         { Invoke-WinPushPackage -ComputerName 'PC-001' -Path '.\Package.zip' -EntryPoint '.\Install-EA.ps1' -CaptureOutput -OutputRoot '   ' } |
             Should Throw 'OutputRoot must not be empty.'
@@ -106,6 +119,12 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:NewPSSessionCredentials = @()
         $script:RemoteDirectoriesCreated = @()
         $script:RemoteExtractions = @()
+        $script:PackageExecutionSessions = @()
+        $script:PackageExecutionRoots = @()
+        $script:PackageExecutionEntryPoints = @()
+        $script:PackageExecutionOutput = @('package output')
+        $script:PackageExecutionErrors = @()
+        $script:PackageExecutionError = $null
         $script:CopiedSessions = @()
         $script:CopiedPaths = @()
         $script:CopiedDestinations = @()
@@ -123,6 +142,8 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:DownloadError = $null
         $script:FixturePackage = Join-Path -Path $TestDrive -ChildPath 'Package.zip'
         Set-Content -LiteralPath $script:FixturePackage -Value 'package' -Encoding utf8NoBOM
+        $script:FixtureScriptPackage = Join-Path -Path $TestDrive -ChildPath 'Install-EA.ps1'
+        Set-Content -LiteralPath $script:FixtureScriptPackage -Value "Write-Output 'package output'" -Encoding utf8NoBOM
     }
 
     Mock New-PSSession {
@@ -178,6 +199,27 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         }
     }
 
+    Mock Invoke-WinPushPsrpPackageEntryPoint {
+        param(
+            $Session,
+            [string] $PackageRoot,
+            [string] $EntryPoint
+        )
+
+        $script:PackageExecutionSessions += $Session
+        $script:PackageExecutionRoots += $PackageRoot
+        $script:PackageExecutionEntryPoints += $EntryPoint
+        if ($null -ne $script:PackageExecutionError) {
+            throw $script:PackageExecutionError
+        }
+
+        [pscustomobject] [ordered] @{
+            PSTypeName = 'WinPush.PsrpPackageEntryPointResult'
+            Output     = @($script:PackageExecutionOutput)
+            Errors     = @($script:PackageExecutionErrors)
+        }
+    }
+
     Mock Copy-WinPushPsrpItem {
         param(
             $Session,
@@ -230,8 +272,8 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
     }
 
     It 'stages one local file package to one target and returns package metadata' {
-        $result = Invoke-WinPushPackage -ComputerName ' PC-001 ' -Path $script:FixturePackage -EntryPoint '.\Install-EA.ps1'
-        $resolvedPackagePath = (Get-Item -LiteralPath $script:FixturePackage).FullName
+        $result = Invoke-WinPushPackage -ComputerName ' PC-001 ' -Path $script:FixtureScriptPackage -EntryPoint '.\Install-EA.ps1'
+        $resolvedPackagePath = (Get-Item -LiteralPath $script:FixtureScriptPackage).FullName
 
         $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
         $result.ComputerName | Should Be 'PC-001'
@@ -247,7 +289,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:CopiedPaths[0] | Should Be $resolvedPackagePath
         $script:CopiedDirections[0] | Should Be 'Upload'
         $script:CopiedDestinations[0] | Should Match ([regex]::Escape('C:\ProgramData\WinPush\Staging\package-'))
-        $script:CopiedDestinations[0] | Should Match ([regex]::Escape('\Package.zip'))
+        $script:CopiedDestinations[0] | Should Match ([regex]::Escape('\Install-EA.ps1'))
         [object]::ReferenceEquals($script:CopiedSessions[0], $script:SessionToReturn) | Should Be $true
         $result.PackageMetadata.PSTypeNames[0] | Should Be 'WinPush.PackageMetadata'
         $result.PackageMetadata.PackageSourceType | Should Be 'Path'
@@ -256,10 +298,52 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.PackageMetadata.RemoteStagePath | Should Be $script:CopiedDestinations[0]
         $result.PackageMetadata.EntryPoint | Should Be '.\Install-EA.ps1'
         $result.PackageMetadata.Extracted | Should Be $false
+        $null -eq $result.PackageMetadata.ExecutionStarted | Should Be $false
+        $null -eq $result.PackageMetadata.ExecutionEnded | Should Be $false
+        $result.PackageMetadata.ExecutionEnded -ge $result.PackageMetadata.ExecutionStarted | Should Be $true
         $result.PackageMetadata.CleanupPolicy | Should Be 'Never'
         $result.PackageMetadata.CleanupSucceeded | Should BeNullOrEmpty
         $result.PackageMetadata.LogsCopied | Should Be $false
-        $result.Output[0].RemoteStagePath | Should Be $result.PackageMetadata.RemoteStagePath
+        @($result.Output).Count | Should Be 1
+        $result.Output[0] | Should Be 'package output'
+        @($result.Errors).Count | Should Be 0
+        @($script:PackageExecutionRoots).Count | Should Be 1
+        $script:PackageExecutionRoots[0] | Should Be $script:RemoteDirectoriesCreated[0]
+        $script:PackageExecutionEntryPoints[0] | Should Be '.\Install-EA.ps1'
+    }
+
+    It 'returns a failed package result when the PowerShell entry point fails without discarding output' {
+        $script:PackageExecutionOutput = @('started package work')
+        $script:PackageExecutionErrors = @('entry point failed')
+
+        $result = Invoke-WinPushPackage -ComputerName 'PC-001' -Path $script:FixtureScriptPackage -EntryPoint '.\Install-EA.ps1'
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'entry point failed'
+        @($result.Output).Count | Should Be 1
+        $result.Output[0] | Should Be 'started package work'
+        @($result.Errors).Count | Should Be 1
+        $result.Errors[0] | Should Be 'entry point failed'
+        $null -eq $result.PackageMetadata.ExecutionStarted | Should Be $false
+        $null -eq $result.PackageMetadata.ExecutionEnded | Should Be $false
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'returns a failed package result when entry point invocation fails and removes the session' {
+        $script:PackageExecutionError = 'entry point invocation failed'
+
+        $result = Invoke-WinPushPackage -ComputerName 'PC-001' -Path $script:FixtureScriptPackage -EntryPoint '.\Install-EA.ps1'
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'entry point invocation failed'
+        $result.PackageMetadata.RemoteStagePath | Should Be $script:CopiedDestinations[0]
+        $null -eq $result.PackageMetadata.ExecutionStarted | Should Be $false
+        $null -eq $result.PackageMetadata.ExecutionEnded | Should Be $false
+        @($script:RemovedSessionIds).Count | Should Be 1
+        $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }
 
     It 'extracts one staged local zip package on the endpoint and returns extracted metadata' {
@@ -276,7 +360,8 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:RemoteExtractions[0].DestinationPath | Should Be $script:RemoteDirectoriesCreated[0]
         $result.PackageMetadata.Extracted | Should Be $true
         $result.PackageMetadata.RemoteStagePath | Should Be $script:RemoteDirectoriesCreated[0]
-        $result.Output[0].Extracted | Should Be $true
+        $result.Output[0] | Should Be 'package output'
+        $script:PackageExecutionRoots[0] | Should Be $script:RemoteDirectoriesCreated[0]
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }
@@ -357,13 +442,14 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.PackageMetadata.PackageSource | Should Be $resolvedPackagePath
         $result.PackageMetadata.LocalPackagePath | Should Be $resolvedPackagePath
         $result.PackageMetadata.RemoteStagePath | Should Be $remoteStageRoot
-        $result.Output[0].RemoteStagePath | Should Be $remoteStageRoot
+        $result.Output[0] | Should Be 'package output'
+        $script:PackageExecutionRoots[0] | Should Be $remoteStageRoot
     }
 
     It 'uses the supplied remote stage root' {
         $result = Invoke-WinPushPackage `
             -ComputerName 'PC-001' `
-            -Path $script:FixturePackage `
+            -Path $script:FixtureScriptPackage `
             -EntryPoint '.\Install-EA.ps1' `
             -RemoteStageRoot 'D:\WinPushStage\'
 
@@ -375,7 +461,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
     It 'passes the supplied credential object unchanged to New-PSSession' {
         $credential = Get-TestCredential -Secret 'Distinctive-Package-Credential-Secret!'
 
-        $result = Invoke-WinPushPackage -ComputerName 'PC-001' -Path $script:FixturePackage -EntryPoint '.\Install-EA.ps1' -Credential $credential
+        $result = Invoke-WinPushPackage -ComputerName 'PC-001' -Path $script:FixtureScriptPackage -EntryPoint '.\Install-EA.ps1' -Credential $credential
 
         $result.Succeeded | Should Be $true
         @($script:NewPSSessionCredentialSupplied).Count | Should Be 1
@@ -454,7 +540,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
     }
 
     It 'removes the session after a successful stage' {
-        Invoke-WinPushPackage -ComputerName 'PC-001' -Path $script:FixturePackage -EntryPoint '.\Install-EA.ps1' | Out-Null
+        Invoke-WinPushPackage -ComputerName 'PC-001' -Path $script:FixtureScriptPackage -EntryPoint '.\Install-EA.ps1' | Out-Null
 
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
@@ -462,7 +548,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
 
     It 'downloads one URI package to the admin workstation cache, stages it to one target, and returns package metadata' {
         $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCache'
-        $uri = 'https://storage.contoso.example/packages/EA%20Install.zip'
+        $uri = 'https://storage.contoso.example/packages/Install-EA.ps1'
 
         $result = Invoke-WinPushPackage `
             -ComputerName ' PC-001 ' `
@@ -484,12 +570,12 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:CopiedPaths[0] | Should Be $script:DownloadOutFiles[0]
         $script:CopiedDirections[0] | Should Be 'Upload'
         $script:CopiedDestinations[0] | Should Match ([regex]::Escape('C:\ProgramData\WinPush\Staging\package-'))
-        $script:CopiedDestinations[0] | Should Match ([regex]::Escape('\EA Install.zip'))
+        $script:CopiedDestinations[0] | Should Match ([regex]::Escape('\Install-EA.ps1'))
         [object]::ReferenceEquals($script:CopiedSessions[0], $script:SessionToReturn) | Should Be $true
         @($script:DownloadUris).Count | Should Be 1
         $script:DownloadUris[0].OriginalString | Should Be $uri
         $script:DownloadOutFiles[0] | Should Match ([regex]::Escape($cacheRoot))
-        $script:DownloadOutFiles[0] | Should Match ([regex]::Escape('EA Install.zip'))
+        $script:DownloadOutFiles[0] | Should Match ([regex]::Escape('Install-EA.ps1'))
         Test-Path -LiteralPath $script:DownloadOutFiles[0] | Should Be $true
         $result.PackageMetadata.PSTypeNames[0] | Should Be 'WinPush.PackageMetadata'
         $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
@@ -500,8 +586,10 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.PackageMetadata.Extracted | Should Be $false
         $result.PackageMetadata.CleanupPolicy | Should Be 'Never'
         $result.PackageMetadata.LogsCopied | Should Be $false
-        $result.Output[0].LocalPackagePath | Should Be $result.PackageMetadata.LocalPackagePath
-        $result.Output[0].RemoteStagePath | Should Be $result.PackageMetadata.RemoteStagePath
+        $null -eq $result.PackageMetadata.ExecutionStarted | Should Be $false
+        $null -eq $result.PackageMetadata.ExecutionEnded | Should Be $false
+        $result.Output[0] | Should Be 'package output'
+        $script:PackageExecutionRoots[0] | Should Be $script:RemoteDirectoriesCreated[0]
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }
@@ -716,5 +804,72 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.ErrorMessage | Should Be 'Invoke-WinPushPackage currently supports exactly one target until roadmap item 11.11.'
         @($script:DownloadUris).Count | Should Be 0
         @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+}
+
+Describe 'WinPush package entry point helpers' {
+    BeforeEach {
+        $script:InvokeCommandSessions = @()
+        $script:InvokeCommandArgumentLists = @()
+        $script:InvokeCommandScriptBlocks = @()
+        $script:InvokeCommandError = $null
+        $script:SessionToReturn = [System.Runtime.Serialization.FormatterServices]::GetUninitializedObject(
+            [System.Management.Automation.Runspaces.PSSession]
+        )
+    }
+
+    Mock Invoke-Command {
+        param(
+            $Session,
+            [scriptblock] $ScriptBlock,
+            [object[]] $ArgumentList,
+            $ErrorAction
+        )
+
+        $null = $ErrorAction
+        $script:InvokeCommandSessions += $Session
+        $script:InvokeCommandArgumentLists += , $ArgumentList
+        $script:InvokeCommandScriptBlocks += [string] $ScriptBlock
+        if ($null -ne $script:InvokeCommandError) {
+            throw $script:InvokeCommandError
+        }
+
+        @(
+            [pscustomobject] [ordered] @{
+                Stream = 'Output'
+                Value  = 'helper output'
+            }
+            [pscustomobject] [ordered] @{
+                Stream = 'Error'
+                Value  = 'helper error'
+            }
+        )
+    }
+
+    It 'normalizes a relative PowerShell entry point beneath the package root' {
+        $plan = Resolve-WinPushPackageEntryPoint -PackageRoot 'C:\Stage\Package\' -EntryPoint '.\tools/Install-EA.ps1'
+
+        $plan.PSTypeNames[0] | Should Be 'WinPush.PackageEntryPointPlan'
+        $plan.PackageRoot | Should Be 'C:\Stage\Package'
+        $plan.RelativePath | Should Be 'tools\Install-EA.ps1'
+        $plan.RemotePath | Should Be 'C:\Stage\Package\tools\Install-EA.ps1'
+    }
+
+    It 'passes the package root as the remote working directory argument and separates streams' {
+        $result = Invoke-WinPushPsrpPackageEntryPoint `
+            -Session $script:SessionToReturn `
+            -PackageRoot 'C:\Stage\Package' `
+            -EntryPoint '.\Install-EA.ps1'
+
+        [object]::ReferenceEquals($script:InvokeCommandSessions[0], $script:SessionToReturn) | Should Be $true
+        $script:InvokeCommandArgumentLists[0][0] | Should Be 'C:\Stage\Package'
+        $script:InvokeCommandArgumentLists[0][1] | Should Be 'Install-EA.ps1'
+        $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape('Set-Location -LiteralPath $WorkingDirectory'))
+        $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape('Test-Path -LiteralPath $entryPointPath -PathType Leaf'))
+        $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape('& $entryPointPath 2>&1'))
+        $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape("Stream = 'Error'"))
+        $result.PSTypeNames[0] | Should Be 'WinPush.PsrpPackageEntryPointResult'
+        $result.Output[0] | Should Be 'helper output'
+        $result.Errors[0] | Should Be 'helper error'
     }
 }

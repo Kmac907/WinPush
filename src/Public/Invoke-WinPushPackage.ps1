@@ -44,6 +44,8 @@ function Invoke-WinPushPackage {
             throw [System.ArgumentException]::new('EntryPoint must not be empty.')
         }
 
+        Resolve-WinPushPackageEntryPoint -PackageRoot 'C:\WinPushPackageRoot' -EntryPoint $EntryPoint | Out-Null
+
         if (($CaptureOutput -or $Logs) -and [string]::IsNullOrWhiteSpace($OutputRoot)) {
             throw [System.ArgumentException]::new('OutputRoot must not be empty.')
         }
@@ -90,6 +92,10 @@ function Invoke-WinPushPackage {
             $cachePlan = $null
             $stagePlan = $null
             $localPackagePath = $null
+            $remoteStagePath = $null
+            $extracted = $false
+            $executionStarted = $null
+            $executionEnded = $null
             $sessionCreationStarted = $false
 
             try {
@@ -119,13 +125,22 @@ function Invoke-WinPushPackage {
                 $stagePlan = New-WinPushPackageStagePlan -RemoteStageRoot $RemoteStageRoot -PackagePath $localPackagePath
                 Invoke-WinPushPsrpPackageStage -Session $session -LocalPackagePath $localPackagePath -StagePlan $stagePlan
                 $remoteStagePath = $stagePlan.RemotePackagePath
-                $extracted = $false
+                $packageRoot = $stagePlan.RemoteDirectory
                 if ($Extract) {
                     Invoke-WinPushPsrpPackageExtract -Session $session -StagePlan $stagePlan
                     $remoteStagePath = $stagePlan.RemoteDirectory
+                    $packageRoot = $stagePlan.RemoteDirectory
                     $extracted = $true
                 }
 
+                $executionStarted = [datetime]::UtcNow
+                $packageExecution = Invoke-WinPushPsrpPackageEntryPoint -Session $session -PackageRoot $packageRoot -EntryPoint $EntryPoint
+                $executionEnded = [datetime]::UtcNow
+                $output = @($packageExecution.Output)
+                $errors = @($packageExecution.Errors)
+                $succeeded = $errors.Count -eq 0
+                $exitCode = if ($succeeded) { 0 } else { 1 }
+                $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
                 $metadata = New-WinPushPackageInfo `
                     -PackageSourceType Uri `
                     -PackageSource $Uri.OriginalString `
@@ -133,18 +148,26 @@ function Invoke-WinPushPackage {
                     -RemoteStagePath $remoteStagePath `
                     -EntryPoint $EntryPoint `
                     -Extracted $extracted `
+                    -ExecutionStarted $executionStarted `
+                    -ExecutionEnded $executionEnded `
                     -CleanupPolicy $Cleanup
 
                 New-WinPushExecutionResult `
                     -ComputerName $target `
                     -Transport 'Psrp' `
                     -Operation 'RunPackage' `
-                    -Succeeded $true `
-                    -ExitCode 0 `
-                    -Output $metadata `
+                    -Succeeded $succeeded `
+                    -ExitCode $exitCode `
+                    -ErrorMessage $errorMessage `
+                    -Output $output `
+                    -Errors $errors `
                     -PackageMetadata $metadata
             }
             catch {
+                if ($null -ne $executionStarted -and $null -eq $executionEnded) {
+                    $executionEnded = [datetime]::UtcNow
+                }
+
                 $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $sessionCreationStarted -and $null -eq $session) {
                     'PSRP package staging session creation failed for the target with the supplied credential.'
                 }
@@ -155,13 +178,21 @@ function Invoke-WinPushPackage {
                 $metadata = $null
                 if ($null -ne $cachePlan) {
                     $metadataLocalPackagePath = if ([string]::IsNullOrWhiteSpace($localPackagePath)) { $cachePlan.LocalPackagePath } else { $localPackagePath }
-                    $metadataRemoteStagePath = if ($null -eq $stagePlan) { $null } else { $stagePlan.RemotePackagePath }
+                    $metadataRemoteStagePath = if ([string]::IsNullOrWhiteSpace($remoteStagePath)) {
+                        if ($null -eq $stagePlan) { $null } else { $stagePlan.RemotePackagePath }
+                    }
+                    else {
+                        $remoteStagePath
+                    }
                     $metadata = New-WinPushPackageInfo `
                         -PackageSourceType Uri `
                         -PackageSource $Uri.OriginalString `
                         -LocalPackagePath $metadataLocalPackagePath `
                         -RemoteStagePath $metadataRemoteStagePath `
                         -EntryPoint $EntryPoint `
+                        -Extracted $extracted `
+                        -ExecutionStarted $executionStarted `
+                        -ExecutionEnded $executionEnded `
                         -CleanupPolicy $Cleanup
                 }
 
@@ -190,6 +221,10 @@ function Invoke-WinPushPackage {
         $stagePlan = $null
         $resolvedPackagePath = $Path
         $packageIsDirectory = $false
+        $remoteStagePath = $null
+        $extracted = $false
+        $executionStarted = $null
+        $executionEnded = $null
         $sessionCreationStarted = $false
 
         try {
@@ -232,13 +267,22 @@ function Invoke-WinPushPackage {
             $stagePlan = New-WinPushPackageStagePlan -RemoteStageRoot $RemoteStageRoot -PackagePath $resolvedPackagePath -Directory:$packageIsDirectory
             Invoke-WinPushPsrpPackageStage -Session $session -LocalPackagePath $resolvedPackagePath -StagePlan $stagePlan
             $remoteStagePath = $stagePlan.RemotePackagePath
-            $extracted = $false
+            $packageRoot = $stagePlan.RemoteDirectory
             if ($Extract) {
                 Invoke-WinPushPsrpPackageExtract -Session $session -StagePlan $stagePlan
                 $remoteStagePath = $stagePlan.RemoteDirectory
+                $packageRoot = $stagePlan.RemoteDirectory
                 $extracted = $true
             }
 
+            $executionStarted = [datetime]::UtcNow
+            $packageExecution = Invoke-WinPushPsrpPackageEntryPoint -Session $session -PackageRoot $packageRoot -EntryPoint $EntryPoint
+            $executionEnded = [datetime]::UtcNow
+            $output = @($packageExecution.Output)
+            $errors = @($packageExecution.Errors)
+            $succeeded = $errors.Count -eq 0
+            $exitCode = if ($succeeded) { 0 } else { 1 }
+            $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
             $metadata = New-WinPushPackageInfo `
                 -PackageSourceType Path `
                 -PackageSource $resolvedPackagePath `
@@ -246,18 +290,26 @@ function Invoke-WinPushPackage {
                 -RemoteStagePath $remoteStagePath `
                 -EntryPoint $EntryPoint `
                 -Extracted $extracted `
+                -ExecutionStarted $executionStarted `
+                -ExecutionEnded $executionEnded `
                 -CleanupPolicy $Cleanup
 
             New-WinPushExecutionResult `
                 -ComputerName $target `
                 -Transport 'Psrp' `
                 -Operation 'RunPackage' `
-                -Succeeded $true `
-                -ExitCode 0 `
-                -Output $metadata `
+                -Succeeded $succeeded `
+                -ExitCode $exitCode `
+                -ErrorMessage $errorMessage `
+                -Output $output `
+                -Errors $errors `
                 -PackageMetadata $metadata
         }
         catch {
+            if ($null -ne $executionStarted -and $null -eq $executionEnded) {
+                $executionEnded = [datetime]::UtcNow
+            }
+
             $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $sessionCreationStarted -and $null -eq $session) {
                 'PSRP package staging session creation failed for the target with the supplied credential.'
             }
@@ -267,12 +319,16 @@ function Invoke-WinPushPackage {
 
             $metadata = $null
             if ($null -ne $stagePlan) {
+                $metadataRemoteStagePath = if ([string]::IsNullOrWhiteSpace($remoteStagePath)) { $stagePlan.RemotePackagePath } else { $remoteStagePath }
                 $metadata = New-WinPushPackageInfo `
                     -PackageSourceType Path `
                     -PackageSource $resolvedPackagePath `
                     -LocalPackagePath $resolvedPackagePath `
-                    -RemoteStagePath $stagePlan.RemotePackagePath `
+                    -RemoteStagePath $metadataRemoteStagePath `
                     -EntryPoint $EntryPoint `
+                    -Extracted $extracted `
+                    -ExecutionStarted $executionStarted `
+                    -ExecutionEnded $executionEnded `
                     -CleanupPolicy $Cleanup
             }
 

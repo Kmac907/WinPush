@@ -90,6 +90,67 @@ function Save-WinPushPackageUriToCache {
     [string] $CachePlan.LocalPackagePath
 }
 
+function Resolve-WinPushPackageEntryPoint {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $PackageRoot,
+
+        [Parameter(Mandatory)]
+        [string] $EntryPoint
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PackageRoot)) {
+        throw [System.ArgumentException]::new('PackageRoot must not be empty.')
+    }
+
+    if ([string]::IsNullOrWhiteSpace($EntryPoint)) {
+        throw [System.ArgumentException]::new('EntryPoint must not be empty.')
+    }
+
+    $trimmedEntryPoint = $EntryPoint.Trim()
+    if ([System.IO.Path]::IsPathRooted($trimmedEntryPoint)) {
+        throw [System.ArgumentException]::new('EntryPoint must be relative to the staged package root.')
+    }
+
+    $segments = @($trimmedEntryPoint -split '[\\/]')
+    $safeSegments = [System.Collections.Generic.List[string]]::new()
+    foreach ($segment in $segments) {
+        if ([string]::IsNullOrWhiteSpace($segment)) {
+            throw [System.ArgumentException]::new('EntryPoint must not contain empty path segments.')
+        }
+
+        if ($segment -eq '..') {
+            throw [System.ArgumentException]::new('EntryPoint must not contain parent traversal.')
+        }
+
+        if ($segment -eq '.') {
+            continue
+        }
+
+        $safeSegments.Add($segment)
+    }
+
+    if ($safeSegments.Count -eq 0) {
+        throw [System.ArgumentException]::new('EntryPoint must include a .ps1 file name.')
+    }
+
+    if ([System.IO.Path]::GetExtension($safeSegments[$safeSegments.Count - 1]) -ne '.ps1') {
+        throw [System.ArgumentException]::new('EntryPoint must refer to a .ps1 file.')
+    }
+
+    $relativePath = $safeSegments.ToArray() -join '\'
+    $normalizedPackageRoot = $PackageRoot.TrimEnd([char[]] @('\', '/'))
+    $remotePath = '{0}\{1}' -f $normalizedPackageRoot, $relativePath
+
+    [pscustomobject] [ordered] @{
+        PSTypeName   = 'WinPush.PackageEntryPointPlan'
+        PackageRoot  = $normalizedPackageRoot
+        RelativePath = $relativePath
+        RemotePath   = $remotePath
+    }
+}
+
 function Invoke-WinPushPsrpPackageStage {
     [CmdletBinding()]
     param(
@@ -153,6 +214,88 @@ function Invoke-WinPushPsrpPackageStage {
         -Path $LocalPackagePath `
         -Destination $StagePlan.RemotePackagePath `
         -Direction Upload
+}
+
+function Invoke-WinPushPsrpPackageEntryPoint {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object] $Session,
+
+        [Parameter(Mandatory)]
+        [string] $PackageRoot,
+
+        [Parameter(Mandatory)]
+        [string] $EntryPoint
+    )
+
+    $entryPointPlan = Resolve-WinPushPackageEntryPoint -PackageRoot $PackageRoot -EntryPoint $EntryPoint
+    $remoteScriptBlock = {
+        param(
+            [Parameter(Mandatory)]
+            [string] $WorkingDirectory,
+
+            [Parameter(Mandatory)]
+            [string] $EntryPointRelativePath
+        )
+
+        try {
+            if (-not (Test-Path -LiteralPath $WorkingDirectory -PathType Container)) {
+                throw [System.IO.DirectoryNotFoundException]::new("Package root was not found: $WorkingDirectory")
+            }
+
+            Set-Location -LiteralPath $WorkingDirectory -ErrorAction Stop
+            $entryPointPath = Join-Path -Path $WorkingDirectory -ChildPath $EntryPointRelativePath
+            if (-not (Test-Path -LiteralPath $entryPointPath -PathType Leaf)) {
+                throw [System.IO.FileNotFoundException]::new("Package entry point was not found: $entryPointPath")
+            }
+
+            & $entryPointPath 2>&1 | ForEach-Object {
+                if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                    [pscustomobject] [ordered] @{
+                        Stream = 'Error'
+                        Value  = [string] $_
+                    }
+                }
+                else {
+                    [pscustomobject] [ordered] @{
+                        Stream = 'Output'
+                        Value  = $_
+                    }
+                }
+            }
+        }
+        catch {
+            [pscustomobject] [ordered] @{
+                Stream = 'Error'
+                Value  = [string] $_
+            }
+        }
+    }
+
+    $streamItems = @(Invoke-Command `
+            -Session $Session `
+            -ScriptBlock $remoteScriptBlock `
+            -ArgumentList $entryPointPlan.PackageRoot, $entryPointPlan.RelativePath `
+            -ErrorAction Stop)
+
+    $output = foreach ($item in $streamItems) {
+        if ($item.Stream -eq 'Output') {
+            $item.Value
+        }
+    }
+
+    $errors = foreach ($item in $streamItems) {
+        if ($item.Stream -eq 'Error') {
+            $item.Value
+        }
+    }
+
+    [pscustomobject] [ordered] @{
+        PSTypeName = 'WinPush.PsrpPackageEntryPointResult'
+        Output     = @($output)
+        Errors     = @($errors)
+    }
 }
 
 function Invoke-WinPushPsrpPackageExtract {
