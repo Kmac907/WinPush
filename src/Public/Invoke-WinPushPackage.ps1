@@ -228,19 +228,24 @@ function Invoke-WinPushPackage {
     }
 
     end {
-        if ($PSCmdlet.ParameterSetName -eq 'PathHostFile' -or $PSCmdlet.ParameterSetName -eq 'UriHostFile') {
-            throw [System.NotSupportedException]::new('HostFile package target input is not supported until the remaining HostFile package target slice.')
-        }
-
+        $isHostFileTargetSet = $PSCmdlet.ParameterSetName.EndsWith('HostFile', [System.StringComparison]::Ordinal)
+        $isUriPackageSet = $PSCmdlet.ParameterSetName.StartsWith('Uri', [System.StringComparison]::Ordinal)
         $sharedRunDirectory = $null
 
-        if ($PSCmdlet.ParameterSetName -eq 'UriComputerName') {
+        if ($isUriPackageSet) {
             $targets = @()
             $cachePlan = $null
             $localPackagePath = $null
 
             try {
-                $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
+                $targets = @(
+                    if ($isHostFileTargetSet) {
+                        Resolve-WinPushTarget -HostFile $HostFile
+                    }
+                    else {
+                        Resolve-WinPushTarget -ComputerName $computerNames.ToArray()
+                    }
+                )
                 $cachePlan = New-WinPushPackageCachePlan -Uri $Uri -PackageCacheRoot $PackageCacheRoot
                 if ($Extract -and [System.IO.Path]::GetExtension([string] $cachePlan.PackageFileName) -ne '.zip') {
                     throw [System.ArgumentException]::new('Extract requires a staged .zip package file.')
@@ -249,7 +254,18 @@ function Invoke-WinPushPackage {
                 $localPackagePath = Save-WinPushPackageUriToCache -Uri $Uri -CachePlan $cachePlan
             }
             catch {
-                $failureTargets = if ($targets.Count -gt 0) { @($targets) } elseif ($computerNames.Count -gt 0) { @([string] $computerNames[0]) } else { @('') }
+                $failureTargets = if ($targets.Count -gt 0) {
+                    @($targets)
+                }
+                elseif ($computerNames.Count -gt 0) {
+                    @([string] $computerNames[0])
+                }
+                elseif ($isHostFileTargetSet -and -not [string]::IsNullOrWhiteSpace($HostFile)) {
+                    @($HostFile)
+                }
+                else {
+                    @('Unknown')
+                }
                 foreach ($failureTarget in $failureTargets) {
                     $metadata = $null
                     if ($null -ne $cachePlan) {
@@ -491,10 +507,28 @@ function Invoke-WinPushPackage {
                 throw [System.ArgumentException]::new('Extract requires a staged .zip package file.')
             }
 
-            $targets = @(Resolve-WinPushTarget -ComputerName $computerNames.ToArray())
+            $targets = @(
+                if ($isHostFileTargetSet) {
+                    Resolve-WinPushTarget -HostFile $HostFile
+                }
+                else {
+                    Resolve-WinPushTarget -ComputerName $computerNames.ToArray()
+                }
+            )
         }
         catch {
-            $resultComputerName = if ($computerNames.Count -eq 1) { [string] $computerNames[0] } else { [string] $ComputerName }
+            $resultComputerName = if ($isHostFileTargetSet -and -not [string]::IsNullOrWhiteSpace($HostFile)) {
+                $HostFile
+            }
+            elseif ($computerNames.Count -eq 1) {
+                [string] $computerNames[0]
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace([string] $ComputerName)) {
+                [string] $ComputerName
+            }
+            else {
+                'Unknown'
+            }
             $result = New-WinPushExecutionResult `
                 -ComputerName $resultComputerName `
                 -Transport 'Psrp' `

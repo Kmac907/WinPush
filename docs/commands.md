@@ -84,12 +84,12 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 
 ### `Invoke-WinPushPackage`
 
-Current package support stages one existing local package file or directory to resolved direct `-ComputerName`, pipeline string, or pipeline-by-property-name `ComputerName` targets through PSRP. Directory packages are staged recursively beneath each remote package root while preserving package-relative file layout. URI package sources are downloaded once to the local admin-workstation cache, then the cached package file is staged to each resolved target. When `-Extract` is supplied with a staged `.zip` package, each endpoint extracts the archive into its package staging directory and sets `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root, runs one package-relative PowerShell `.ps1` entry point, retains entry-point output and errors in each returned result, records execution timestamps in `PackageMetadata`, writes one shared package `summary.csv` plus one per-target `run.log` when `-CaptureOutput` is supplied, copies convention-based package logs when `-Logs` is supplied, and applies the requested remote staged-package cleanup policy after optional logs. Host-file package targets are planned for the next package workflow slice.
+Current package support stages one existing local package file or directory to resolved direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP. Directory packages are staged recursively beneath each remote package root while preserving package-relative file layout. URI package sources are downloaded once to the local admin-workstation cache, then the cached package file is staged to each resolved target. When `-Extract` is supplied with a staged `.zip` package, each endpoint extracts the archive into its package staging directory and sets `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root, runs one package-relative PowerShell `.ps1` entry point, retains entry-point output and errors in each returned result, records execution timestamps in `PackageMetadata`, writes one shared package `summary.csv` plus one per-target `run.log` when `-CaptureOutput` is supplied, copies convention-based package logs when `-Logs` is supplied, and applies the requested remote staged-package cleanup policy after optional logs.
 
 | Parameter | Argument | Notes |
 | --- | --- | --- |
 | `-ComputerName` | `string[]` | Target names. Also accepts pipeline strings and pipeline objects with a `ComputerName` property. |
-| `-HostFile` | `string` | UTF-8 file containing target names. Planned for later package workflows; currently rejected. |
+| `-HostFile` | `string` | UTF-8 file containing target names. Blank lines and full-line `#` comments are ignored, and duplicate targets are removed case-insensitively. |
 | `-Path` | `string` | Existing local admin-workstation package file or directory. Mutually exclusive with `-Uri`. |
 | `-Uri` | `uri` | Absolute remote package source downloaded to the admin-workstation cache before endpoint staging. Mutually exclusive with `-Path`. |
 | `-EntryPoint` | `string` | PowerShell `.ps1` package entry point relative to the staged package root. Required. |
@@ -102,7 +102,7 @@ Current package support stages one existing local package file or directory to r
 | `-RemoteStageRoot` | `string` | Remote endpoint staging root. Defaults to `C:\ProgramData\WinPush\Staging`. |
 | `-Credential` | `PSCredential` | Optional PSRP credential. Uses the current identity when omitted. |
 
-Current package staging, extraction, execution, artifact capture, and log copy support resolved direct `-ComputerName`, pipeline string, and pipeline-by-property-name `ComputerName` targets. `-Path` and `-Uri` are mutually exclusive. URI packages are downloaded once by the admin workstation before the cached file is uploaded to each endpoint through PSRP. `-EntryPoint` must be a package-relative `.ps1` path; rooted paths, parent traversal, empty path segments, and non-PowerShell entry points are rejected before execution.
+Current package staging, extraction, execution, artifact capture, and log copy support resolved direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, and `-HostFile` targets. `-Path` and `-Uri` are mutually exclusive. URI packages are downloaded once by the admin workstation before the cached file is uploaded to each endpoint through PSRP. `-EntryPoint` must be a package-relative `.ps1` path; rooted paths, parent traversal, empty path segments, and non-PowerShell entry points are rejected before execution.
 
 ## Target Input
 
@@ -171,7 +171,7 @@ Command and script behavior is determined by caller-supplied command text or scr
 
 - PowerShell 7.6 `Core` is the supported controller shell.
 - Windows PowerShell 5.1 compatibility is not guaranteed.
-- `Invoke-WinPushPackage` supports direct `-ComputerName` arrays, pipeline strings, and pipeline objects with a `ComputerName` property. Host-file package targets are not implemented yet.
+- `Invoke-WinPushPackage` supports direct `-ComputerName` arrays, pipeline strings, pipeline objects with a `ComputerName` property, and `-HostFile` targets.
 - SSH transport, retries, parallel fan-out, persistent sessions, and transport fallback are not implemented.
 - Automatic WinRM, firewall, TrustedHosts, certificate, endpoint, or policy configuration is not implemented.
 - Recursive file transfer, recursive log enumeration, and multi-target file transfer are not implemented.

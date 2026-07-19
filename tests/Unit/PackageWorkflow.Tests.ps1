@@ -105,15 +105,6 @@ Describe 'Invoke-WinPushPackage contract' {
             Should Throw 'OutputRoot must not be empty.'
     }
 
-    It 'guards package features that belong to later roadmap slices' {
-        $packagePath = Join-Path -Path $TestDrive -ChildPath 'Package.zip'
-        Set-Content -LiteralPath $packagePath -Value 'package' -Encoding utf8NoBOM
-
-        { Invoke-WinPushPackage -HostFile '.\hosts.txt' -Path $packagePath -EntryPoint '.\Install-EA.ps1' } |
-            Should Throw 'HostFile package target input is not supported until the remaining HostFile package target slice.'
-        { Invoke-WinPushPackage -HostFile '.\hosts.txt' -Uri 'https://storage.contoso.example/packages/EA.zip' -EntryPoint '.\Install-EA.ps1' } |
-            Should Throw 'HostFile package target input is not supported until the remaining HostFile package target slice.'
-    }
 }
 
 Describe 'Invoke-WinPushPackage local package preparation and staging' {
@@ -1181,6 +1172,46 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         @($script:RemovedSessionIds).Count | Should Be 2
     }
 
+    It 'runs HostFile package targets in resolved order without comments, blanks, or duplicate targets' {
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'package-hosts.txt'
+        @(
+            '# package hosts'
+            ' PC-001 '
+            ''
+            'pc-001'
+            '   # skipped comment'
+            'PC-002'
+        ) | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+
+        $results = @(Invoke-WinPushPackage `
+                -HostFile $hostFile `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1')
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        @($script:PackageExecutionEntryPoints).Count | Should Be 2
+        @($script:RemovedSessionIds).Count | Should Be 2
+        $results[0].PackageMetadata.PackageSourceType | Should Be 'Path'
+        $results[1].PackageMetadata.PackageSourceType | Should Be 'Path'
+    }
+
+    It 'fails invalid HostFile package targets before opening a session' {
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'missing-package-hosts.txt'
+
+        $result = Invoke-WinPushPackage `
+            -HostFile $hostFile `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1'
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Match 'Host file was not found:'
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemoteDirectoriesCreated).Count | Should Be 0
+        @($script:CopiedPaths).Count | Should Be 0
+    }
+
     It 'continues to later package targets after one target session fails' {
         $script:NewPSSessionErrorsByComputerName = @{
             'PC-002' = 'connection failed'
@@ -1188,6 +1219,29 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
 
         $results = @(Invoke-WinPushPackage `
                 -ComputerName @('PC-001', 'PC-002', 'PC-003') `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1')
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $false
+        $results[1].ErrorMessage | Should Be 'connection failed'
+        $results[2].Succeeded | Should Be $true
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        @($script:PackageExecutionEntryPoints).Count | Should Be 2
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'continues to later HostFile package targets after one target session fails' {
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'mixed-package-hosts.txt'
+        @('PC-001', 'PC-002', 'PC-003') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+        $script:NewPSSessionErrorsByComputerName = @{
+            'PC-002' = 'connection failed'
+        }
+
+        $results = @(Invoke-WinPushPackage `
+                -HostFile $hostFile `
                 -Path $script:FixtureScriptPackage `
                 -EntryPoint '.\Install-EA.ps1')
 
@@ -1242,6 +1296,55 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
         $script:CopiedLogRunDirectories[0] | Should BeNullOrEmpty
         $script:CopiedLogRunDirectories[1] | Should Be $results[0].RunDirectory
+    }
+
+    It 'captures output and copies logs for HostFile package targets under one shared run folder' {
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'artifact-package-hosts.txt'
+        @('PC-001', 'PC-002') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'HostFilePackageArtifacts'
+
+        $results = @(Invoke-WinPushPackage `
+                -HostFile $hostFile `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1' `
+                -CaptureOutput `
+                -Logs `
+                -OutputRoot $outputRoot)
+
+        @($results).Count | Should Be 2
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
+        $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        $results[0].ResultPath | Should Be (Join-Path -Path $results[0].ComputerDirectory -ChildPath 'run.log')
+        $results[1].ResultPath | Should Be (Join-Path -Path $results[1].ComputerDirectory -ChildPath 'run.log')
+        $script:CopiedLogRunDirectories[0] | Should Be $results[0].RunDirectory
+        $script:CopiedLogRunDirectories[1] | Should Be $results[0].RunDirectory
+        $script:CopiedLogComputerDirectories[0] | Should Be $results[0].ComputerDirectory
+        $script:CopiedLogComputerDirectories[1] | Should Be $results[1].ComputerDirectory
+        @($results[0].Logs).Count | Should Be 1
+        @($results[1].Logs).Count | Should Be 1
+
+        $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'summary.csv'))
+        @($summaryRows).Count | Should Be 2
+        ($summaryRows.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+    }
+
+    It 'passes the supplied credential object unchanged for HostFile package targets' {
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'credential-package-hosts.txt'
+        @('PC-001', 'PC-002') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+        $credential = Get-TestCredential -Secret 'Distinctive-HostFile-Package-Credential-Secret!'
+
+        $results = @(Invoke-WinPushPackage `
+                -HostFile $hostFile `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1' `
+                -Credential $credential)
+
+        @($results).Count | Should Be 2
+        @($script:NewPSSessionCredentialSupplied).Count | Should Be 2
+        ($script:NewPSSessionCredentialSupplied -join ',') | Should Be 'True,True'
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
+        [object]::ReferenceEquals($script:NewPSSessionCredentials[1], $credential) | Should Be $true
     }
 
     It 'removes the session after a successful stage' {
@@ -1571,6 +1674,55 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $results[0].PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
         $results[1].PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
         @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'downloads one URI package once and stages it to every HostFile target' {
+        $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'HostFileMultiPackageCache'
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'uri-package-hosts.txt'
+        @(
+            '# URI package hosts'
+            ' PC-001 '
+            'pc-001'
+            ''
+            'PC-002'
+        ) | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+
+        $results = @(Invoke-WinPushPackage `
+            -HostFile $hostFile `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -PackageCacheRoot $cacheRoot)
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        @($script:DownloadUris).Count | Should Be 1
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        @($script:CopiedPaths).Count | Should Be 2
+        $script:CopiedPaths[0] | Should Be $script:DownloadOutFiles[0]
+        $script:CopiedPaths[1] | Should Be $script:DownloadOutFiles[0]
+        $results[0].PackageMetadata.PackageSourceType | Should Be 'Uri'
+        $results[1].PackageMetadata.PackageSourceType | Should Be 'Uri'
+        $results[0].PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
+        $results[1].PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'fails invalid HostFile URI package targets before downloading or opening a session' {
+        $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'InvalidHostFilePackageCache'
+        $hostFile = Join-Path -Path $TestDrive -ChildPath 'missing-uri-package-hosts.txt'
+
+        $result = Invoke-WinPushPackage `
+            -HostFile $hostFile `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -PackageCacheRoot $cacheRoot
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Match 'Host file was not found:'
+        @($script:DownloadUris).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemoteDirectoriesCreated).Count | Should Be 0
+        @($script:CopiedPaths).Count | Should Be 0
     }
 
     It 'runs pipeline ComputerName strings for URI package targets in resolved order' {
