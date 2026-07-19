@@ -96,6 +96,61 @@ function Add-WinPushPackageLogArtifact {
     $Result
 }
 
+function Set-WinPushPackageCleanupResult {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [psobject] $Result,
+
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        [object] $Session,
+
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        [object] $StagePlan,
+
+        [Parameter(Mandatory)]
+        [string] $RemoteStageRoot,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('Never', 'OnSuccess', 'Always')]
+        [string] $Cleanup
+    )
+
+    if ($null -eq $Result.PackageMetadata) {
+        return $Result
+    }
+
+    $Result.PackageMetadata.CleanupPolicy = $Cleanup
+    if ($Cleanup -eq 'Never') {
+        return $Result
+    }
+
+    $shouldCleanup = $Cleanup -eq 'Always' -or ($Cleanup -eq 'OnSuccess' -and $Result.Succeeded)
+    if (-not $shouldCleanup -or $null -eq $Session -or $null -eq $StagePlan) {
+        return $Result
+    }
+
+    if (-not [bool] $StagePlan.StageDirectoryCreated) {
+        return $Result
+    }
+
+    try {
+        Remove-WinPushPsrpPackageStage `
+            -Session $Session `
+            -StagePlan $StagePlan `
+            -RemoteStageRoot $RemoteStageRoot
+
+        $Result.PackageMetadata.CleanupSucceeded = $true
+    }
+    catch {
+        $Result.PackageMetadata.CleanupSucceeded = $false
+    }
+
+    $Result
+}
+
 function Invoke-WinPushPackage {
     [CmdletBinding(DefaultParameterSetName = 'PathComputerName')]
     param(
@@ -171,10 +226,6 @@ function Invoke-WinPushPackage {
     end {
         if ($PSCmdlet.ParameterSetName -eq 'PathHostFile' -or $PSCmdlet.ParameterSetName -eq 'UriHostFile') {
             throw [System.NotSupportedException]::new('HostFile package target input is not supported until roadmap item 11.11.')
-        }
-
-        if ($Cleanup -ne 'Never') {
-            throw [System.NotSupportedException]::new('Cleanup policies other than Never are not supported until roadmap item 11.10.')
         }
 
         if ($PSCmdlet.ParameterSetName -eq 'UriComputerName') {
@@ -269,6 +320,13 @@ function Invoke-WinPushPackage {
                         -RemoteLogDirectory $remoteLogDirectory
                 }
 
+                $result = Set-WinPushPackageCleanupResult `
+                    -Result $result `
+                    -Session $session `
+                    -StagePlan $stagePlan `
+                    -RemoteStageRoot $RemoteStageRoot `
+                    -Cleanup $Cleanup
+
                 $result
             }
             catch {
@@ -329,6 +387,13 @@ function Invoke-WinPushPackage {
                         -OutputRoot $OutputRoot `
                         -RemoteLogDirectory $remoteLogDirectory
                 }
+
+                $result = Set-WinPushPackageCleanupResult `
+                    -Result $result `
+                    -Session $session `
+                    -StagePlan $stagePlan `
+                    -RemoteStageRoot $RemoteStageRoot `
+                    -Cleanup $Cleanup
 
                 $result
             }
@@ -445,6 +510,13 @@ function Invoke-WinPushPackage {
                     -RemoteLogDirectory $remoteLogDirectory
             }
 
+            $result = Set-WinPushPackageCleanupResult `
+                -Result $result `
+                -Session $session `
+                -StagePlan $stagePlan `
+                -RemoteStageRoot $RemoteStageRoot `
+                -Cleanup $Cleanup
+
             $result
         }
         catch {
@@ -499,6 +571,13 @@ function Invoke-WinPushPackage {
                     -OutputRoot $OutputRoot `
                     -RemoteLogDirectory $remoteLogDirectory
             }
+
+            $result = Set-WinPushPackageCleanupResult `
+                -Result $result `
+                -Session $session `
+                -StagePlan $stagePlan `
+                -RemoteStageRoot $RemoteStageRoot `
+                -Cleanup $Cleanup
 
             $result
         }

@@ -27,6 +27,7 @@ function New-WinPushPackageStagePlan {
         RemotePackagePath  = $remotePackagePath
         PackageFileName    = $fileName
         IsDirectory        = [bool] $Directory
+        StageDirectoryCreated = $false
     }
 }
 
@@ -171,6 +172,7 @@ function Invoke-WinPushPsrpPackageStage {
         } `
         -ArgumentList $StagePlan.RemoteDirectory `
         -ErrorAction Stop
+    $StagePlan.StageDirectoryCreated = $true
 
     if ($StagePlan.IsDirectory) {
         $localPackageRoot = (Get-Item -LiteralPath $LocalPackagePath -ErrorAction Stop).FullName
@@ -326,5 +328,54 @@ function Invoke-WinPushPsrpPackageExtract {
             Expand-Archive -LiteralPath $archivePath -DestinationPath $destinationPath -Force -ErrorAction Stop
         } `
         -ArgumentList $StagePlan.RemotePackagePath, $StagePlan.RemoteDirectory `
+        -ErrorAction Stop
+}
+
+function Remove-WinPushPsrpPackageStage {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object] $Session,
+
+        [Parameter(Mandatory)]
+        [object] $StagePlan,
+
+        [Parameter(Mandatory)]
+        [string] $RemoteStageRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RemoteStageRoot)) {
+        throw [System.ArgumentException]::new('RemoteStageRoot must not be empty.')
+    }
+
+    $remoteDirectory = [string] $StagePlan.RemoteDirectory
+    if ([string]::IsNullOrWhiteSpace($remoteDirectory)) {
+        throw [System.ArgumentException]::new('Package cleanup path must not be empty.')
+    }
+
+    $canonicalStageRoot = [System.IO.Path]::GetFullPath(('{0}\' -f $RemoteStageRoot.TrimEnd('\')))
+    $canonicalRemoteDirectory = [System.IO.Path]::GetFullPath($remoteDirectory)
+    if (-not $canonicalRemoteDirectory.StartsWith($canonicalStageRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw [System.InvalidOperationException]::new('Package cleanup path must stay under RemoteStageRoot.')
+    }
+
+    $stageLeaf = Split-Path -Path $canonicalRemoteDirectory -Leaf
+    if (-not $stageLeaf.StartsWith('package-', [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw [System.InvalidOperationException]::new('Package cleanup path must reference a WinPush package stage directory.')
+    }
+
+    $null = Invoke-Command `
+        -Session $Session `
+        -ScriptBlock {
+            $cleanupDirectory = [string] $args[0]
+            $canonicalAllowedRoot = [System.IO.Path]::GetFullPath(('{0}\' -f ([string] $args[1]).TrimEnd('\')))
+            $canonicalCleanupDirectory = [System.IO.Path]::GetFullPath($cleanupDirectory)
+            if (-not $canonicalCleanupDirectory.StartsWith($canonicalAllowedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw [System.InvalidOperationException]::new('Package cleanup path must stay under RemoteStageRoot.')
+            }
+
+            Remove-Item -LiteralPath $canonicalCleanupDirectory -Recurse -Force -ErrorAction Stop
+        } `
+        -ArgumentList $canonicalRemoteDirectory, $canonicalStageRoot `
         -ErrorAction Stop
 }

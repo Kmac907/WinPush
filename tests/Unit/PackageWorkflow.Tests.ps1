@@ -113,8 +113,6 @@ Describe 'Invoke-WinPushPackage contract' {
             Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
         { Invoke-WinPushPackage -HostFile '.\hosts.txt' -Uri 'https://storage.contoso.example/packages/EA.zip' -EntryPoint '.\Install-EA.ps1' } |
             Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
-        { Invoke-WinPushPackage -ComputerName 'PC-001' -Path $packagePath -EntryPoint '.\Install-EA.ps1' -Cleanup Always } |
-            Should Throw 'Cleanup policies other than Never are not supported until roadmap item 11.10.'
     }
 }
 
@@ -144,6 +142,10 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:LogCopyError = $null
         $script:LogCopyReturnedLogs = $null
         $script:LogCopyReturnedCopiedLogPaths = $null
+        $script:CleanupSessions = @()
+        $script:CleanupStagePlans = @()
+        $script:CleanupStageRoots = @()
+        $script:CleanupError = $null
         $script:DownloadUris = @()
         $script:DownloadOutFiles = @()
         $script:RemovedSessionIds = @()
@@ -329,6 +331,22 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         }
     }
 
+    Mock Remove-WinPushPsrpPackageStage {
+        param(
+            $Session,
+            $StagePlan,
+            [string] $RemoteStageRoot
+        )
+
+        $script:CleanupSessions += $Session
+        $script:CleanupStagePlans += $StagePlan
+        $script:CleanupStageRoots += $RemoteStageRoot
+        $script:PackageOperationOrder += 'Cleanup'
+        if ($null -ne $script:CleanupError) {
+            throw $script:CleanupError
+        }
+    }
+
     Mock Invoke-WebRequest {
         param(
             [uri] $Uri,
@@ -395,6 +413,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.PackageMetadata.ExecutionEnded -ge $result.PackageMetadata.ExecutionStarted | Should Be $true
         $result.PackageMetadata.CleanupPolicy | Should Be 'Never'
         $result.PackageMetadata.CleanupSucceeded | Should BeNullOrEmpty
+        @($script:CleanupStagePlans).Count | Should Be 0
         $result.PackageMetadata.LogsCopied | Should Be $false
         @($result.PackageMetadata.CopiedLogPaths).Count | Should Be 0
         @($result.Output).Count | Should Be 1
@@ -410,6 +429,43 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         @($script:PackageExecutionRoots).Count | Should Be 1
         $script:PackageExecutionRoots[0] | Should Be $script:RemoteDirectoriesCreated[0]
         $script:PackageExecutionEntryPoints[0] | Should Be '.\Install-EA.ps1'
+    }
+
+    It 'removes the staged package directory after successful package execution when cleanup is OnSuccess' {
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Cleanup OnSuccess
+
+        $result.Succeeded | Should Be $true
+        $result.Output[0] | Should Be 'package output'
+        $result.PackageMetadata.CleanupPolicy | Should Be 'OnSuccess'
+        $result.PackageMetadata.CleanupSucceeded | Should Be $true
+        @($script:CleanupStagePlans).Count | Should Be 1
+        [object]::ReferenceEquals($script:CleanupSessions[0], $script:SessionToReturn) | Should Be $true
+        $script:CleanupStagePlans[0].RemoteDirectory | Should Be $script:RemoteDirectoriesCreated[0]
+        $script:CleanupStageRoots[0] | Should Be 'C:\ProgramData\WinPush\Staging'
+        ($script:PackageOperationOrder -join ',') | Should Be 'Package,Cleanup'
+    }
+
+    It 'records cleanup failure without changing successful package output' {
+        $script:CleanupError = 'remote cleanup failed'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Cleanup OnSuccess
+
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        [string]::IsNullOrEmpty($result.ErrorMessage) | Should Be $true
+        $result.Output[0] | Should Be 'package output'
+        @($result.Errors).Count | Should Be 0
+        $result.PackageMetadata.CleanupPolicy | Should Be 'OnSuccess'
+        $result.PackageMetadata.CleanupSucceeded | Should Be $false
+        @($script:CleanupStagePlans).Count | Should Be 1
     }
 
     It 'writes summary and run log artifacts for successful package capture output' {
@@ -483,6 +539,25 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         ($script:PackageOperationOrder -join ',') | Should Be 'Package,Logs'
     }
 
+    It 'runs successful cleanup after package log collection' {
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Logs `
+            -Cleanup OnSuccess `
+            -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $true
+        @($result.Logs).Count | Should Be 1
+        $result.PackageMetadata.LogsCopied | Should Be $true
+        $result.PackageMetadata.CleanupPolicy | Should Be 'OnSuccess'
+        $result.PackageMetadata.CleanupSucceeded | Should Be $true
+        @($script:CleanupStagePlans).Count | Should Be 1
+        [object]::ReferenceEquals($script:CleanupSessions[0], $script:SessionToReturn) | Should Be $true
+        ($script:PackageOperationOrder -join ',') | Should Be 'Package,Logs,Cleanup'
+    }
+
     It 'writes package logs under the captured package artifact folder' {
         $outputRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCaptureAndLogs'
 
@@ -521,6 +596,45 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }
 
+    It 'does not clean up failed package execution when cleanup is OnSuccess' {
+        $script:PackageExecutionOutput = @('started package work')
+        $script:PackageExecutionErrors = @('entry point failed')
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Cleanup OnSuccess
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'entry point failed'
+        $result.Output[0] | Should Be 'started package work'
+        $result.Errors[0] | Should Be 'entry point failed'
+        $result.PackageMetadata.CleanupPolicy | Should Be 'OnSuccess'
+        $result.PackageMetadata.CleanupSucceeded | Should BeNullOrEmpty
+        @($script:CleanupStagePlans).Count | Should Be 0
+    }
+
+    It 'cleans up failed package execution when cleanup is Always' {
+        $script:PackageExecutionOutput = @('started package work')
+        $script:PackageExecutionErrors = @('entry point failed')
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Cleanup Always
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'entry point failed'
+        $result.Output[0] | Should Be 'started package work'
+        $result.Errors[0] | Should Be 'entry point failed'
+        $result.PackageMetadata.CleanupPolicy | Should Be 'Always'
+        $result.PackageMetadata.CleanupSucceeded | Should Be $true
+        @($script:CleanupStagePlans).Count | Should Be 1
+        ($script:PackageOperationOrder -join ',') | Should Be 'Package,Cleanup'
+    }
+
     It 'copies package logs after a failed package execution without discarding output or errors' {
         $script:PackageExecutionOutput = @('started package work')
         $script:PackageExecutionErrors = @('entry point failed')
@@ -543,6 +657,55 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.PackageMetadata.LogsCopied | Should Be $true
         $result.PackageMetadata.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
         ($script:PackageOperationOrder -join ',') | Should Be 'Package,Logs'
+    }
+
+    It 'runs Always cleanup after logs for failed package execution' {
+        $script:PackageExecutionOutput = @('started package work')
+        $script:PackageExecutionErrors = @('entry point failed')
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Fail-EA.ps1' `
+            -Logs `
+            -Cleanup Always `
+            -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'entry point failed'
+        $result.Output[0] | Should Be 'started package work'
+        $result.Errors[0] | Should Be 'entry point failed'
+        @($result.Logs).Count | Should Be 1
+        $result.PackageMetadata.LogsCopied | Should Be $true
+        $result.PackageMetadata.CleanupPolicy | Should Be 'Always'
+        $result.PackageMetadata.CleanupSucceeded | Should Be $true
+        @($script:CleanupStagePlans).Count | Should Be 1
+        ($script:PackageOperationOrder -join ',') | Should Be 'Package,Logs,Cleanup'
+    }
+
+    It 'records Always cleanup failure without discarding failed package or log outcomes' {
+        $script:PackageExecutionOutput = @('started package work')
+        $script:PackageExecutionErrors = @('entry point failed')
+        $script:CleanupError = 'remote cleanup failed'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Fail-EA.ps1' `
+            -Logs `
+            -Cleanup Always `
+            -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'entry point failed'
+        $result.Output[0] | Should Be 'started package work'
+        $result.Errors[0] | Should Be 'entry point failed'
+        @($result.Logs).Count | Should Be 1
+        $result.PackageMetadata.LogsCopied | Should Be $true
+        $result.PackageMetadata.CleanupPolicy | Should Be 'Always'
+        $result.PackageMetadata.CleanupSucceeded | Should Be $false
+        @($script:CleanupStagePlans).Count | Should Be 1
+        ($script:PackageOperationOrder -join ',') | Should Be 'Package,Logs,Cleanup'
     }
 
     It 'records package log source failures without changing primary package success' {
@@ -598,6 +761,28 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.PackageMetadata.LogsCopied | Should Be $false
         @($result.PackageMetadata.CopiedLogPaths).Count | Should Be 0
         ($script:PackageOperationOrder -join ',') | Should Be 'Package,Logs'
+    }
+
+    It 'runs cleanup after a package log source failure when cleanup is OnSuccess' {
+        $script:LogCopyError = 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\Install-EA'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Logs `
+            -Cleanup OnSuccess `
+            -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $true
+        $result.Output[0] | Should Be 'package output'
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].Copied | Should Be $false
+        $result.PackageMetadata.LogsCopied | Should Be $false
+        $result.PackageMetadata.CleanupPolicy | Should Be 'OnSuccess'
+        $result.PackageMetadata.CleanupSucceeded | Should Be $true
+        @($script:CleanupStagePlans).Count | Should Be 1
+        ($script:PackageOperationOrder -join ',') | Should Be 'Package,Logs,Cleanup'
     }
 
     It 'writes summary and run log artifacts for captured package errors' {
@@ -883,6 +1068,22 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }
 
+    It 'does not attempt Always cleanup when remote staging directory creation fails before a stage exists' {
+        $script:RemoteDirectoryError = 'remote staging directory failed'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixturePackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Cleanup Always
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'remote staging directory failed'
+        $result.PackageMetadata.CleanupPolicy | Should Be 'Always'
+        $result.PackageMetadata.CleanupSucceeded | Should BeNullOrEmpty
+        @($script:CleanupStagePlans).Count | Should Be 0
+    }
+
     It 'returns a failed package result when upload fails and removes the session' {
         $script:CopyError = 'package upload failed'
 
@@ -894,6 +1095,23 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.PackageMetadata.RemoteStagePath | Should Be $script:CopiedDestinations[0]
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'cleans up after upload failure when cleanup is Always and the stage directory exists' {
+        $script:CopyError = 'package upload failed'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixturePackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Cleanup Always
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'package upload failed'
+        $result.PackageMetadata.CleanupPolicy | Should Be 'Always'
+        $result.PackageMetadata.CleanupSucceeded | Should Be $true
+        @($script:CleanupStagePlans).Count | Should Be 1
+        $script:CleanupStagePlans[0].RemoteDirectory | Should Be $script:RemoteDirectoriesCreated[0]
     }
 
     It 'returns a failed package result when directory package upload fails and removes the session' {
@@ -966,6 +1184,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.PackageMetadata.EntryPoint | Should Be '.\Install-EA.ps1'
         $result.PackageMetadata.Extracted | Should Be $false
         $result.PackageMetadata.CleanupPolicy | Should Be 'Never'
+        $result.PackageMetadata.CleanupSucceeded | Should BeNullOrEmpty
         $result.PackageMetadata.LogsCopied | Should Be $false
         $null -eq $result.PackageMetadata.ExecutionStarted | Should Be $false
         $null -eq $result.PackageMetadata.ExecutionEnded | Should Be $false
@@ -973,6 +1192,24 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:PackageExecutionRoots[0] | Should Be $script:RemoteDirectoriesCreated[0]
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'removes the staged cached URI package directory after successful cleanup OnSuccess' {
+        $uri = 'https://storage.contoso.example/packages/Install-EA.ps1'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName ' PC-001 ' `
+            -Uri $uri `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Cleanup OnSuccess
+
+        $result.Succeeded | Should Be $true
+        $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
+        $result.PackageMetadata.CleanupPolicy | Should Be 'OnSuccess'
+        $result.PackageMetadata.CleanupSucceeded | Should Be $true
+        @($script:CleanupStagePlans).Count | Should Be 1
+        $script:CleanupStagePlans[0].RemoteDirectory | Should Be $script:RemoteDirectoriesCreated[0]
+        ($script:PackageOperationOrder -join ',') | Should Be 'Package,Cleanup'
     }
 
     It 'writes summary and run log artifacts for cached URI package capture output' {
@@ -1287,5 +1524,74 @@ Describe 'WinPush package entry point helpers' {
         $result.PSTypeNames[0] | Should Be 'WinPush.PsrpPackageEntryPointResult'
         $result.Output[0] | Should Be 'helper output'
         $result.Errors[0] | Should Be 'helper error'
+    }
+
+    It 'removes only the generated package stage directory under the remote staging root' {
+        $stagePlan = [pscustomobject] [ordered] @{
+            PSTypeName        = 'WinPush.PackageStagePlan'
+            StageId           = 'package-20260719010101000-abcdef12'
+            RemoteDirectory   = 'C:\ProgramData\WinPush\Staging\package-20260719010101000-abcdef12'
+            RemotePackagePath = 'C:\ProgramData\WinPush\Staging\package-20260719010101000-abcdef12\Install-EA.ps1'
+            PackageFileName   = 'Install-EA.ps1'
+            IsDirectory       = $false
+        }
+
+        Remove-WinPushPsrpPackageStage `
+            -Session $script:SessionToReturn `
+            -StagePlan $stagePlan `
+            -RemoteStageRoot 'C:\ProgramData\WinPush\Staging'
+
+        @($script:InvokeCommandArgumentLists).Count | Should Be 1
+        $script:InvokeCommandArgumentLists[0][0] | Should Be $stagePlan.RemoteDirectory
+        $script:InvokeCommandArgumentLists[0][1] | Should Be 'C:\ProgramData\WinPush\Staging\'
+        $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape('Remove-Item -LiteralPath $canonicalCleanupDirectory -Recurse -Force -ErrorAction Stop'))
+    }
+
+    It 'refuses package stage cleanup outside the remote staging root before invoking the endpoint' {
+        $stagePlan = [pscustomobject] [ordered] @{
+            PSTypeName        = 'WinPush.PackageStagePlan'
+            StageId           = 'package-20260719010101000-abcdef12'
+            RemoteDirectory   = 'C:\ProgramData\OtherTool\package-20260719010101000-abcdef12'
+            RemotePackagePath = 'C:\ProgramData\OtherTool\package-20260719010101000-abcdef12\Install-EA.ps1'
+            PackageFileName   = 'Install-EA.ps1'
+            IsDirectory       = $false
+        }
+
+        { Remove-WinPushPsrpPackageStage -Session $script:SessionToReturn -StagePlan $stagePlan -RemoteStageRoot 'C:\ProgramData\WinPush\Staging' } |
+            Should Throw 'Package cleanup path must stay under RemoteStageRoot.'
+
+        @($script:InvokeCommandArgumentLists).Count | Should Be 0
+    }
+
+    It 'refuses package stage cleanup when traversal would leave the remote staging root' {
+        $stagePlan = [pscustomobject] [ordered] @{
+            PSTypeName        = 'WinPush.PackageStagePlan'
+            StageId           = 'package-20260719010101000-abcdef12'
+            RemoteDirectory   = 'C:\ProgramData\WinPush\Staging\..\package-20260719010101000-abcdef12'
+            RemotePackagePath = 'C:\ProgramData\WinPush\Staging\..\package-20260719010101000-abcdef12\Install-EA.ps1'
+            PackageFileName   = 'Install-EA.ps1'
+            IsDirectory       = $false
+        }
+
+        { Remove-WinPushPsrpPackageStage -Session $script:SessionToReturn -StagePlan $stagePlan -RemoteStageRoot 'C:\ProgramData\WinPush\Staging' } |
+            Should Throw 'Package cleanup path must stay under RemoteStageRoot.'
+
+        @($script:InvokeCommandArgumentLists).Count | Should Be 0
+    }
+
+    It 'refuses package stage cleanup when the leaf is not a WinPush package stage directory' {
+        $stagePlan = [pscustomobject] [ordered] @{
+            PSTypeName        = 'WinPush.PackageStagePlan'
+            StageId           = 'not-package'
+            RemoteDirectory   = 'C:\ProgramData\WinPush\Staging\manual-folder'
+            RemotePackagePath = 'C:\ProgramData\WinPush\Staging\manual-folder\Install-EA.ps1'
+            PackageFileName   = 'Install-EA.ps1'
+            IsDirectory       = $false
+        }
+
+        { Remove-WinPushPsrpPackageStage -Session $script:SessionToReturn -StagePlan $stagePlan -RemoteStageRoot 'C:\ProgramData\WinPush\Staging' } |
+            Should Throw 'Package cleanup path must reference a WinPush package stage directory.'
+
+        @($script:InvokeCommandArgumentLists).Count | Should Be 0
     }
 }
