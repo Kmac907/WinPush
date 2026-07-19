@@ -110,9 +110,9 @@ Describe 'Invoke-WinPushPackage contract' {
         Set-Content -LiteralPath $packagePath -Value 'package' -Encoding utf8NoBOM
 
         { Invoke-WinPushPackage -HostFile '.\hosts.txt' -Path $packagePath -EntryPoint '.\Install-EA.ps1' } |
-            Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
+            Should Throw 'HostFile package target input is not supported until the remaining HostFile package target slice.'
         { Invoke-WinPushPackage -HostFile '.\hosts.txt' -Uri 'https://storage.contoso.example/packages/EA.zip' -EntryPoint '.\Install-EA.ps1' } |
-            Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
+            Should Throw 'HostFile package target input is not supported until the remaining HostFile package target slice.'
     }
 }
 
@@ -153,6 +153,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
             [System.Management.Automation.Runspaces.PSSession]
         )
         $script:NewPSSessionError = $null
+        $script:NewPSSessionErrorsByComputerName = @{}
         $script:RemoteDirectoryError = $null
         $script:RemoteExtractionError = $null
         $script:CopyError = $null
@@ -180,6 +181,10 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
 
         if ($null -ne $script:NewPSSessionError) {
             throw $script:NewPSSessionError
+        }
+
+        if ($script:NewPSSessionErrorsByComputerName.ContainsKey($ComputerName)) {
+            throw $script:NewPSSessionErrorsByComputerName[$ComputerName]
         }
 
         return $script:SessionToReturn
@@ -1130,12 +1135,113 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }
 
-    It 'requires exactly one resolved target before opening a session' {
-        $result = Invoke-WinPushPackage -ComputerName @('PC-001', 'PC-002') -Path $script:FixturePackage -EntryPoint '.\Install-EA.ps1'
+    It 'runs direct ComputerName package targets in resolved order without duplicate targets' {
+        $results = @(Invoke-WinPushPackage `
+                -ComputerName @(' PC-001 ', 'pc-001', 'PC-002', 'PC-003') `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1')
 
-        $result.Succeeded | Should Be $false
-        $result.ErrorMessage | Should Be 'Invoke-WinPushPackage currently supports exactly one target until roadmap item 11.11.'
-        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        @($script:PackageExecutionEntryPoints).Count | Should Be 3
+        @($script:RemovedSessionIds).Count | Should Be 3
+        $results[0].PackageMetadata.PackageSourceType | Should Be 'Path'
+        $results[1].PackageMetadata.PackageSourceType | Should Be 'Path'
+        $results[2].PackageMetadata.PackageSourceType | Should Be 'Path'
+    }
+
+    It 'runs pipeline ComputerName strings for package targets in resolved order' {
+        $results = @(@(' PC-001 ', 'pc-001', 'PC-002') | Invoke-WinPushPackage `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1')
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        @($script:PackageExecutionEntryPoints).Count | Should Be 2
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'runs pipeline objects with ComputerName property for package targets in resolved order' {
+        $pipelineTargets = @(
+            [pscustomobject] @{ ComputerName = ' PC-001 ' }
+            [pscustomobject] @{ ComputerName = 'pc-001' }
+            [pscustomobject] @{ ComputerName = 'PC-002' }
+        )
+
+        $results = @($pipelineTargets | Invoke-WinPushPackage `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1')
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        @($script:PackageExecutionEntryPoints).Count | Should Be 2
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'continues to later package targets after one target session fails' {
+        $script:NewPSSessionErrorsByComputerName = @{
+            'PC-002' = 'connection failed'
+        }
+
+        $results = @(Invoke-WinPushPackage `
+                -ComputerName @('PC-001', 'PC-002', 'PC-003') `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1')
+
+        @($results).Count | Should Be 3
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        $results[0].Succeeded | Should Be $true
+        $results[1].Succeeded | Should Be $false
+        $results[1].ErrorMessage | Should Be 'connection failed'
+        $results[2].Succeeded | Should Be $true
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
+        @($script:PackageExecutionEntryPoints).Count | Should Be 2
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'captures direct ComputerName package output under one shared run folder' {
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'MultiPackageArtifacts'
+
+        $results = @(Invoke-WinPushPackage `
+                -ComputerName @('PC-001', 'PC-002') `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1' `
+                -CaptureOutput `
+                -OutputRoot $outputRoot)
+
+        @($results).Count | Should Be 2
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
+        $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        $results[0].ResultPath | Should Be (Join-Path -Path $results[0].ComputerDirectory -ChildPath 'run.log')
+        $results[1].ResultPath | Should Be (Join-Path -Path $results[1].ComputerDirectory -ChildPath 'run.log')
+        Test-Path -LiteralPath $results[0].ResultPath -PathType Leaf | Should Be $true
+        Test-Path -LiteralPath $results[1].ResultPath -PathType Leaf | Should Be $true
+
+        $summaryRows = @(Import-Csv -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'summary.csv'))
+        @($summaryRows).Count | Should Be 2
+        ($summaryRows.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($summaryRows.Operation -join ',') | Should Be 'RunPackage,RunPackage'
+        ($summaryRows.ResultPath -join ',') | Should Be (($results[0].ResultPath, $results[1].ResultPath) -join ',')
+    }
+
+    It 'copies direct ComputerName package logs under one shared run folder' {
+        $results = @(Invoke-WinPushPackage `
+                -ComputerName @('PC-001', 'PC-002') `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1' `
+                -Logs `
+                -OutputRoot $TestDrive)
+
+        @($results).Count | Should Be 2
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
+        $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
+        $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
+        $script:CopiedLogRunDirectories[0] | Should BeNullOrEmpty
+        $script:CopiedLogRunDirectories[1] | Should Be $results[0].RunDirectory
     }
 
     It 'removes the session after a successful stage' {
@@ -1447,16 +1553,54 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
-    It 'requires exactly one resolved target before downloading a URI package' {
-        $result = Invoke-WinPushPackage `
-            -ComputerName @('PC-001', 'PC-002') `
+    It 'downloads one URI package once and stages it to every direct ComputerName target' {
+        $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'MultiPackageCache'
+        $results = @(Invoke-WinPushPackage `
+            -ComputerName @(' PC-001 ', 'pc-001', 'PC-002') `
             -Uri 'https://storage.contoso.example/packages/EA.zip' `
-            -EntryPoint '.\Install-EA.ps1'
+            -EntryPoint '.\Install-EA.ps1' `
+            -PackageCacheRoot $cacheRoot)
 
-        $result.Succeeded | Should Be $false
-        $result.ErrorMessage | Should Be 'Invoke-WinPushPackage currently supports exactly one target until roadmap item 11.11.'
-        @($script:DownloadUris).Count | Should Be 0
-        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        @($script:DownloadUris).Count | Should Be 1
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        @($script:CopiedPaths).Count | Should Be 2
+        $script:CopiedPaths[0] | Should Be $script:DownloadOutFiles[0]
+        $script:CopiedPaths[1] | Should Be $script:DownloadOutFiles[0]
+        $results[0].PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
+        $results[1].PackageMetadata.LocalPackagePath | Should Be $script:DownloadOutFiles[0]
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'runs pipeline ComputerName strings for URI package targets in resolved order' {
+        $results = @(@(' PC-001 ', 'pc-001', 'PC-002') | Invoke-WinPushPackage `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1')
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        @($script:DownloadUris).Count | Should Be 1
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        @($script:RemovedSessionIds).Count | Should Be 2
+    }
+
+    It 'runs pipeline objects with ComputerName property for URI package targets in resolved order' {
+        $pipelineTargets = @(
+            [pscustomobject] @{ ComputerName = ' PC-001 ' }
+            [pscustomobject] @{ ComputerName = 'pc-001' }
+            [pscustomobject] @{ ComputerName = 'PC-002' }
+        )
+
+        $results = @($pipelineTargets | Invoke-WinPushPackage `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1')
+
+        @($results).Count | Should Be 2
+        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        @($script:DownloadUris).Count | Should Be 1
+        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        @($script:RemovedSessionIds).Count | Should Be 2
     }
 }
 
