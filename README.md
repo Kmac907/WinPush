@@ -290,6 +290,7 @@ Manual validation:
 - run a harmless command with `Invoke-WinPushCommand`
 - confirm captured output artifacts when using `-CaptureOutput`
 - confirm copied logs when using `-Logs`
+- run package workflow integration with `.\tests\Integration\Invoke-WinPushPackageLiveValidation.ps1 -ComputerName PC01`
 
 ## Notes
 

@@ -69,7 +69,7 @@ Additional cleanup:
 
 `Invoke-WinPushPackage` currently stages one existing local package file or directory from the admin workstation to resolved direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP. It creates one remote staging directory per target under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It can also download one absolute URI package to the admin-workstation cache, then upload the cached package file to each resolved target through PSRP. When `-Extract` is supplied with a staged `.zip` package, each endpoint extracts the archive into its package staging directory and returns `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root and runs one package-relative PowerShell `.ps1` entry point per target. When `-CaptureOutput` is supplied, package entry-point output and errors are written to the same local artifact shape as command and script execution: one shared run-level `summary.csv` and one per-target `run.log`. When `-Logs` is supplied, immediate regular files are copied from `C:\ProgramData\EA\Logs\<entry-point-name>\` to the local target `Logs` folder. When `-Cleanup OnSuccess` or `-Cleanup Always` is supplied, the generated remote stage directory is removed after optional log collection. It returns one `WinPush.ExecutionResult` with `Operation = RunPackage` per resolved target.
 
-Later package workflow slices add live package validation.
+Live package workflow validation is covered by the integration harness in `tests/Integration/Invoke-WinPushPackageLiveValidation.ps1`.
 
 Package workflow results carry `PackageMetadata` on the returned `WinPush.ExecutionResult`. The metadata shape is:
 
@@ -155,6 +155,41 @@ Package `-CaptureOutput` uses the same local artifact shape as command and scrip
 Package `-Logs` uses the package entry point base name to copy immediate regular files from `C:\ProgramData\EA\Logs\<entry-point-name>\` into the local target `Logs` folder. Log copy runs after package entry-point execution using the same PSSession. Log-copy failures are reflected in `Logs`, `CopiedLogPaths`, `PackageMetadata.LogsCopied`, and `PackageMetadata.CopiedLogPaths` without changing the primary package success or failure state.
 
 Package `-Cleanup` controls remote staged-package retention. The default `Never` preserves staged files. `OnSuccess` removes the generated stage directory after successful package execution, and `Always` removes it after success or failure when a remote stage was created. Cleanup runs after optional log collection. Cleanup failures set `PackageMetadata.CleanupSucceeded = False` without changing the primary package output, errors, or log-copy outcome.
+
+## Live Package Workflow Validation
+
+Run the package live-validation harness from the repository root when a controlled PSRP target is available:
+
+```powershell
+.\tests\Integration\Invoke-WinPushPackageLiveValidation.ps1 `
+    -ComputerName PC01
+```
+
+Use `-Credential` when the target requires explicit PSRP credentials:
+
+```powershell
+$Credential = Get-Credential
+
+.\tests\Integration\Invoke-WinPushPackageLiveValidation.ps1 `
+    -ComputerName PC01 `
+    -Credential $Credential
+```
+
+The harness imports the source module, preflights PSRP session creation, and writes a JSON result under `artifacts\validation` by default. If PSRP session creation fails, it records `Status = Blocked`, `Blocked = true`, the preflight error, and exits with code `2` before creating remote package artifacts.
+
+Parameters:
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `ComputerName` | Required | Target used for live PSRP package validation. |
+| `Credential` | Current identity | Optional `PSCredential` passed to preflight and package workflow sessions. |
+| `OutputRoot` | `.\artifacts\validation\package-live-output` | Local root used for `-CaptureOutput` and `-Logs` artifacts. |
+| `ResultPath` | Timestamped JSON under `.\artifacts\validation` | Machine-readable validation result. |
+| `PackageCacheRoot` | Temporary folder | URI package download cache used by `Invoke-WinPushPackage`; removed by the harness. |
+| `RemoteStageRoot` | `C:\ProgramData\WinPush\Staging` | Remote package staging root to validate and clean. |
+| `HttpPort` | Auto-selected loopback port | Local ephemeral HTTP server port for the disposable URI package source. |
+
+When PSRP authentication works, the harness creates disposable local file, directory, zip, and loopback URI package sources, runs `Invoke-WinPushPackage` through PSRP, validates package output capture, immediate-file log copy from `C:\ProgramData\EA\Logs\<entry-point-name>`, `Cleanup Never`, `Cleanup OnSuccess`, `Cleanup Always`, representative entry-point failure, remote stage cleanup, and local PSSession count stability. It removes local scratch package sources, the temporary URI cache, retained remote package stages, and validation log directories it creates. Generated JSON and captured validation artifacts live under ignored `artifacts/`.
 
 Defaults:
 
