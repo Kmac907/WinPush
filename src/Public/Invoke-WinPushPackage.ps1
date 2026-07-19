@@ -32,6 +32,70 @@ function Add-WinPushPackageCaptureOutputArtifact {
     $Result
 }
 
+function Add-WinPushPackageLogArtifact {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [psobject] $Result,
+
+        [Parameter(Mandatory)]
+        [object] $Session,
+
+        [Parameter(Mandatory)]
+        [string] $OutputRoot,
+
+        [Parameter(Mandatory)]
+        [string] $RemoteLogDirectory
+    )
+
+    $logResults = @()
+    $copiedLogPaths = @()
+
+    try {
+        $logCopy = Copy-WinPushPsrpLogDirectory `
+            -Session $Session `
+            -ComputerName $Result.ComputerName `
+            -RemoteDirectory $RemoteLogDirectory `
+            -OutputRoot $OutputRoot `
+            -RunDirectory $Result.RunDirectory `
+            -ComputerDirectory $Result.ComputerDirectory
+
+        $Result.RunDirectory = $logCopy.RunDirectory
+        $Result.ComputerDirectory = $logCopy.ComputerDirectory
+        $logResults = @($logCopy.Logs)
+        $copiedLogPaths = @($logCopy.CopiedLogPaths)
+    }
+    catch {
+        if ([string]::IsNullOrWhiteSpace($Result.RunDirectory) -or [string]::IsNullOrWhiteSpace($Result.ComputerDirectory)) {
+            $artifactDirectory = New-WinPushLogArtifactDirectory `
+                -OutputRoot $OutputRoot `
+                -ComputerName $Result.ComputerName `
+                -RunDirectory $Result.RunDirectory
+
+            $Result.RunDirectory = $artifactDirectory.RunDirectory
+            $Result.ComputerDirectory = $artifactDirectory.ComputerDirectory
+        }
+
+        $logResults = @(
+            New-WinPushLogResult `
+                -ComputerName $Result.ComputerName `
+                -RemotePath $RemoteLogDirectory `
+                -Copied $false `
+                -ErrorMessage $_.Exception.Message
+        )
+    }
+
+    $Result.Logs = $logResults
+    $Result.CopiedLogPaths = $copiedLogPaths
+
+    if ($null -ne $Result.PackageMetadata) {
+        $Result.PackageMetadata.LogsCopied = $copiedLogPaths.Count -gt 0
+        $Result.PackageMetadata.CopiedLogPaths = $copiedLogPaths
+    }
+
+    $Result
+}
+
 function Invoke-WinPushPackage {
     [CmdletBinding(DefaultParameterSetName = 'PathComputerName')]
     param(
@@ -92,6 +156,7 @@ function Invoke-WinPushPackage {
             throw [System.ArgumentException]::new('RemoteStageRoot must not be empty.')
         }
 
+        $remoteLogDirectory = if ($Logs) { Get-WinPushScriptLogDirectory -ScriptPath $EntryPoint } else { $null }
         $computerNames = [System.Collections.Generic.List[string]]::new()
     }
 
@@ -106,10 +171,6 @@ function Invoke-WinPushPackage {
     end {
         if ($PSCmdlet.ParameterSetName -eq 'PathHostFile' -or $PSCmdlet.ParameterSetName -eq 'UriHostFile') {
             throw [System.NotSupportedException]::new('HostFile package target input is not supported until roadmap item 11.11.')
-        }
-
-        if ($Logs) {
-            throw [System.NotSupportedException]::new('Logs is not supported until roadmap item 11.9.')
         }
 
         if ($Cleanup -ne 'Never') {
@@ -200,6 +261,14 @@ function Invoke-WinPushPackage {
                         -ArtifactIdentity ('Uri: {0}; EntryPoint: {1}' -f $Uri.OriginalString, $EntryPoint)
                 }
 
+                if ($Logs) {
+                    $result = Add-WinPushPackageLogArtifact `
+                        -Result $result `
+                        -Session $session `
+                        -OutputRoot $OutputRoot `
+                        -RemoteLogDirectory $remoteLogDirectory
+                }
+
                 $result
             }
             catch {
@@ -251,6 +320,14 @@ function Invoke-WinPushPackage {
                         -Result $result `
                         -OutputRoot $OutputRoot `
                         -ArtifactIdentity ('Uri: {0}; EntryPoint: {1}' -f $Uri.OriginalString, $EntryPoint)
+                }
+
+                if ($Logs -and $null -ne $session -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
+                    $result = Add-WinPushPackageLogArtifact `
+                        -Result $result `
+                        -Session $session `
+                        -OutputRoot $OutputRoot `
+                        -RemoteLogDirectory $remoteLogDirectory
                 }
 
                 $result
@@ -360,6 +437,14 @@ function Invoke-WinPushPackage {
                     -ArtifactIdentity ('Path: {0}; EntryPoint: {1}' -f $resolvedPackagePath, $EntryPoint)
             }
 
+            if ($Logs) {
+                $result = Add-WinPushPackageLogArtifact `
+                    -Result $result `
+                    -Session $session `
+                    -OutputRoot $OutputRoot `
+                    -RemoteLogDirectory $remoteLogDirectory
+            }
+
             $result
         }
         catch {
@@ -405,6 +490,14 @@ function Invoke-WinPushPackage {
                     -Result $result `
                     -OutputRoot $OutputRoot `
                     -ArtifactIdentity ('Path: {0}; EntryPoint: {1}' -f $resolvedPackagePath, $EntryPoint)
+            }
+
+            if ($Logs -and $null -ne $session -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
+                $result = Add-WinPushPackageLogArtifact `
+                    -Result $result `
+                    -Session $session `
+                    -OutputRoot $OutputRoot `
+                    -RemoteLogDirectory $remoteLogDirectory
             }
 
             $result

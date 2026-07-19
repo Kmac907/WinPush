@@ -1,18 +1,26 @@
 $script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..')
 $script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Targeting\Resolve-WinPushTarget.ps1'
 $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushExecutionResult.ps1'
+$script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushLogResult.ps1'
 $script:PackageInfoPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushPackageInfo.ps1'
 $script:PsrpCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Copy-WinPushPsrpItem.ps1'
 $script:PackageStagePath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\New-WinPushPackageStagePlan.ps1'
 $script:ArtifactWriterPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
+$script:ScriptLogDirectoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\Get-WinPushScriptLogDirectory.ps1'
+$script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\New-WinPushLogArtifactDirectory.ps1'
+$script:PsrpLogCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\Copy-WinPushPsrpLogDirectory.ps1'
 $script:PackageCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Public\Invoke-WinPushPackage.ps1'
 
 . $script:ResolverPath
 . $script:ResultFactoryPath
+. $script:LogResultFactoryPath
 . $script:PackageInfoPath
 . $script:PsrpCopyPath
 . $script:PackageStagePath
 . $script:ArtifactWriterPath
+. $script:ScriptLogDirectoryPath
+. $script:LogArtifactPath
+. $script:PsrpLogCopyPath
 . $script:PackageCommandPath
 
 function Get-TestCredential {
@@ -105,8 +113,6 @@ Describe 'Invoke-WinPushPackage contract' {
             Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
         { Invoke-WinPushPackage -HostFile '.\hosts.txt' -Uri 'https://storage.contoso.example/packages/EA.zip' -EntryPoint '.\Install-EA.ps1' } |
             Should Throw 'HostFile package target input is not supported until roadmap item 11.11.'
-        { Invoke-WinPushPackage -ComputerName 'PC-001' -Path $packagePath -EntryPoint '.\Install-EA.ps1' -Logs } |
-            Should Throw 'Logs is not supported until roadmap item 11.9.'
         { Invoke-WinPushPackage -ComputerName 'PC-001' -Path $packagePath -EntryPoint '.\Install-EA.ps1' -Cleanup Always } |
             Should Throw 'Cleanup policies other than Never are not supported until roadmap item 11.10.'
     }
@@ -125,10 +131,19 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:PackageExecutionOutput = @('package output')
         $script:PackageExecutionErrors = @()
         $script:PackageExecutionError = $null
+        $script:PackageOperationOrder = @()
         $script:CopiedSessions = @()
         $script:CopiedPaths = @()
         $script:CopiedDestinations = @()
         $script:CopiedDirections = @()
+        $script:CopiedLogSessions = @()
+        $script:CopiedLogComputerNames = @()
+        $script:CopiedLogRemoteDirectories = @()
+        $script:CopiedLogRunDirectories = @()
+        $script:CopiedLogComputerDirectories = @()
+        $script:LogCopyError = $null
+        $script:LogCopyReturnedLogs = $null
+        $script:LogCopyReturnedCopiedLogPaths = $null
         $script:DownloadUris = @()
         $script:DownloadOutFiles = @()
         $script:RemovedSessionIds = @()
@@ -209,6 +224,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:PackageExecutionSessions += $Session
         $script:PackageExecutionRoots += $PackageRoot
         $script:PackageExecutionEntryPoints += $EntryPoint
+        $script:PackageOperationOrder += 'Package'
         if ($null -ne $script:PackageExecutionError) {
             throw $script:PackageExecutionError
         }
@@ -234,6 +250,82 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:CopiedDirections += $Direction
         if ($null -ne $script:CopyError) {
             throw $script:CopyError
+        }
+    }
+
+    Mock Copy-WinPushPsrpLogDirectory {
+        param(
+            $Session,
+            [string] $ComputerName,
+            [string] $RemoteDirectory,
+            [string] $OutputRoot,
+            [AllowNull()]
+            [string] $RunDirectory,
+            [AllowNull()]
+            [string] $ComputerDirectory
+        )
+
+        $script:CopiedLogSessions += $Session
+        $script:CopiedLogComputerNames += $ComputerName
+        $script:CopiedLogRemoteDirectories += $RemoteDirectory
+        $script:CopiedLogRunDirectories += $RunDirectory
+        $script:CopiedLogComputerDirectories += $ComputerDirectory
+        $script:PackageOperationOrder += 'Logs'
+
+        if ($null -ne $script:LogCopyError) {
+            throw $script:LogCopyError
+        }
+
+        $effectiveRunDirectory = if ([string]::IsNullOrWhiteSpace($RunDirectory)) {
+            Join-Path -Path $OutputRoot -ChildPath 'run-logs'
+        }
+        else {
+            $RunDirectory
+        }
+
+        $effectiveComputerDirectory = if ([string]::IsNullOrWhiteSpace($ComputerDirectory)) {
+            Join-Path -Path $effectiveRunDirectory -ChildPath $ComputerName
+        }
+        else {
+            $ComputerDirectory
+        }
+
+        $remotePath = Join-Path -Path $RemoteDirectory -ChildPath 'package.log'
+        $localPath = Join-Path -Path (Join-Path -Path $effectiveComputerDirectory -ChildPath 'Logs') -ChildPath 'package.log'
+        $logResult = New-WinPushLogResult `
+            -ComputerName $ComputerName `
+            -RemotePath $remotePath `
+            -LocalPath $localPath `
+            -Copied $true
+        $logs = if ($null -ne $script:LogCopyReturnedLogs) {
+            @($script:LogCopyReturnedLogs)
+        }
+        else {
+            @($logResult)
+        }
+        $copiedLogPaths = if ($null -ne $script:LogCopyReturnedCopiedLogPaths) {
+            @($script:LogCopyReturnedCopiedLogPaths)
+        }
+        else {
+            @($logs | Where-Object { $_.Copied } | ForEach-Object { $_.LocalPath })
+        }
+
+        [pscustomobject] [ordered] @{
+            FileMetadata      = @(
+                [pscustomobject] [ordered] @{
+                    ComputerName      = $ComputerName
+                    RemotePath        = $remotePath
+                    Name              = 'package.log'
+                    Length            = 12
+                    LastWriteTimeUtc  = [datetime]::UtcNow
+                }
+            )
+            Logs              = $logs
+            Errors            = @($logs | Where-Object { -not $_.Copied } | ForEach-Object { $_.Error })
+            CopiedLogPaths    = $copiedLogPaths
+            RunDirectory      = $effectiveRunDirectory
+            ComputerDirectory = $effectiveComputerDirectory
+            LogDirectory      = Join-Path -Path $effectiveComputerDirectory -ChildPath 'Logs'
         }
     }
 
@@ -304,9 +396,12 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.PackageMetadata.CleanupPolicy | Should Be 'Never'
         $result.PackageMetadata.CleanupSucceeded | Should BeNullOrEmpty
         $result.PackageMetadata.LogsCopied | Should Be $false
+        @($result.PackageMetadata.CopiedLogPaths).Count | Should Be 0
         @($result.Output).Count | Should Be 1
         $result.Output[0] | Should Be 'package output'
         @($result.Errors).Count | Should Be 0
+        @($result.Logs).Count | Should Be 0
+        @($result.CopiedLogPaths).Count | Should Be 0
         $result.RunDirectory | Should BeNullOrEmpty
         $result.ComputerDirectory | Should BeNullOrEmpty
         $result.ResultPath | Should BeNullOrEmpty
@@ -362,6 +457,51 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $runLog | Should Match ([regex]::Escape('Errors:'))
     }
 
+    It 'copies package logs after successful package execution' {
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Logs `
+            -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $true
+        $result.Output[0] | Should Be 'package output'
+        @($result.Errors).Count | Should Be 0
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].PSTypeNames[0] | Should Be 'WinPush.LogResult'
+        $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\Install-EA\package.log'
+        $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
+        $result.PackageMetadata.LogsCopied | Should Be $true
+        $result.PackageMetadata.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
+        $result.RunDirectory | Should Be (Join-Path -Path $TestDrive -ChildPath 'run-logs')
+        $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
+        @($script:CopiedLogSessions).Count | Should Be 1
+        [object]::ReferenceEquals($script:PackageExecutionSessions[0], $script:CopiedLogSessions[0]) | Should Be $true
+        [object]::ReferenceEquals($script:CopiedLogSessions[0], $script:SessionToReturn) | Should Be $true
+        $script:CopiedLogRemoteDirectories[0] | Should Be 'C:\ProgramData\EA\Logs\Install-EA'
+        ($script:PackageOperationOrder -join ',') | Should Be 'Package,Logs'
+    }
+
+    It 'writes package logs under the captured package artifact folder' {
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCaptureAndLogs'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -CaptureOutput `
+            -Logs `
+            -OutputRoot $outputRoot
+
+        $result.Succeeded | Should Be $true
+        Test-Path -LiteralPath $result.ResultPath -PathType Leaf | Should Be $true
+        $script:CopiedLogComputerDirectories[0] | Should Be $result.ComputerDirectory
+        $result.Logs[0].LocalPath | Should Be (Join-Path -Path (Join-Path -Path $result.ComputerDirectory -ChildPath 'Logs') -ChildPath 'package.log')
+        $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
+        $result.PackageMetadata.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
+    }
+
     It 'returns a failed package result when the PowerShell entry point fails without discarding output' {
         $script:PackageExecutionOutput = @('started package work')
         $script:PackageExecutionErrors = @('entry point failed')
@@ -379,6 +519,85 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $null -eq $result.PackageMetadata.ExecutionEnded | Should Be $false
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+    }
+
+    It 'copies package logs after a failed package execution without discarding output or errors' {
+        $script:PackageExecutionOutput = @('started package work')
+        $script:PackageExecutionErrors = @('entry point failed')
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Fail-EA.ps1' `
+            -Logs `
+            -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 1
+        $result.ErrorMessage | Should Be 'entry point failed'
+        $result.Output[0] | Should Be 'started package work'
+        $result.Errors[0] | Should Be 'entry point failed'
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\Fail-EA\package.log'
+        $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
+        $result.PackageMetadata.LogsCopied | Should Be $true
+        $result.PackageMetadata.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
+        ($script:PackageOperationOrder -join ',') | Should Be 'Package,Logs'
+    }
+
+    It 'records package log source failures without changing primary package success' {
+        $script:LogCopyError = 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\Install-EA'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Logs `
+            -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        [string]::IsNullOrEmpty($result.ErrorMessage) | Should Be $true
+        $result.Output[0] | Should Be 'package output'
+        @($result.Errors).Count | Should Be 0
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].Copied | Should Be $false
+        $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\Install-EA'
+        $result.Logs[0].Error | Should Be 'RemoteDirectory was not found or is not a directory: C:\ProgramData\EA\Logs\Install-EA'
+        @($result.CopiedLogPaths).Count | Should Be 0
+        $result.PackageMetadata.LogsCopied | Should Be $false
+        @($result.PackageMetadata.CopiedLogPaths).Count | Should Be 0
+        ($script:PackageOperationOrder -join ',') | Should Be 'Package,Logs'
+    }
+
+    It 'keeps package success when one attached package log file copy fails' {
+        $script:LogCopyReturnedLogs = @(
+            New-WinPushLogResult `
+                -ComputerName 'PC-001' `
+                -RemotePath 'C:\ProgramData\EA\Logs\Install-EA\package.log' `
+                -Copied $false `
+                -ErrorMessage 'Copy failed for package.log'
+        )
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -Logs `
+            -OutputRoot $TestDrive
+
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        [string]::IsNullOrEmpty($result.ErrorMessage) | Should Be $true
+        $result.Output[0] | Should Be 'package output'
+        @($result.Errors).Count | Should Be 0
+        @($result.Logs).Count | Should Be 1
+        $result.Logs[0].Copied | Should Be $false
+        $result.Logs[0].Error | Should Be 'Copy failed for package.log'
+        @($result.CopiedLogPaths).Count | Should Be 0
+        $result.PackageMetadata.LogsCopied | Should Be $false
+        @($result.PackageMetadata.CopiedLogPaths).Count | Should Be 0
+        ($script:PackageOperationOrder -join ',') | Should Be 'Package,Logs'
     }
 
     It 'writes summary and run log artifacts for captured package errors' {

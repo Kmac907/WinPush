@@ -28,7 +28,7 @@ Out of scope:
 
 - automatic WinRM, firewall, TrustedHosts, certificate, endpoint, or policy configuration
 - credential storage
-- recursive transfer, recursive log copy, retries, parallel fan-out, SSH transport, or package orchestration
+- recursive transfer, recursive log copy, retries, parallel fan-out, SSH transport, or advanced package orchestration
 
 ## Repository Layout
 
@@ -148,7 +148,7 @@ ErrorMessage  :
 | `Invoke-WinPushScript` | Runs an existing local `.ps1` file on one or more targets through PSRP, WinRS, or PsExec. |
 | `Copy-WinPushItem` | Uploads or downloads one file through PSRP. |
 | `Get-WinPushLog` | Copies immediate files from an explicit remote log directory. |
-| `Invoke-WinPushPackage` | Stages one local package file or directory to one target through PSRP, or downloads one URI package to the local cache, stages the cached package to one target, optionally extracts staged `.zip` packages on the endpoint, and runs one package-relative PowerShell `.ps1` entry point. |
+| `Invoke-WinPushPackage` | Stages one local package file or directory to one target through PSRP, or downloads one URI package to the local cache, stages the cached package to one target, optionally extracts staged `.zip` packages on the endpoint, runs one package-relative PowerShell `.ps1` entry point, optionally captures package output artifacts, and optionally copies package logs. |
 
 Command standards:
 
@@ -198,6 +198,17 @@ Invoke-WinPushScript `
 ```
 
 Native script transports copy the script through small native PowerShell staging commands, invoke the staged file under `C:\Windows\Temp\WinPush\<stage-id>\`, and remove the staged folder after execution. Use `-KeepStagedScript` only when you need to inspect the staged file after a run.
+
+Run a package and copy package logs:
+
+```powershell
+Invoke-WinPushPackage `
+    -ComputerName PC01 `
+    -Path .\EAInstallPackage `
+    -EntryPoint .\Install-EA.ps1 `
+    -CaptureOutput `
+    -Logs
+```
 
 Copy a file to a target:
 
@@ -277,6 +288,7 @@ Manual validation:
 - test a known reachable target with `Test-WinPushTarget`
 - run a harmless command with `Invoke-WinPushCommand`
 - confirm captured output artifacts when using `-CaptureOutput`
+- confirm copied logs when using `-Logs`
 
 ## Notes
 
