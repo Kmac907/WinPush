@@ -104,10 +104,12 @@ Describe 'WinPush module import foundation' {
         $formatted = $result | Out-String -Width 220
 
         $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Transport'
         $formatted | Should Match 'Status'
         $formatted | Should Match 'ExitCode'
         $formatted | Should Match 'ErrorSummary'
         $formatted | Should Match 'PC01'
+        $formatted | Should Match 'Psrp'
         $formatted | Should Match 'OK'
         $formatted | Should Not Match 'Operation'
         $formatted | Should Not Match 'Details'
@@ -118,7 +120,6 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Not Match 'OutputPreview'
         $formatted | Should Not Match 'first remote output'
         $formatted | Should Not Match 'last remote output'
-        $formatted | Should Not Match 'Transport'
         $formatted | Should Not Match '^Output\s+:'
         $formatted | Should Not Match '^Errors\s+:'
         $formatted | Should Not Match '^Logs\s+:'
@@ -143,6 +144,7 @@ Describe 'WinPush module import foundation' {
         $formatted = $result | Out-String -Width 220
 
         $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Transport'
         $formatted | Should Match 'Status'
         $formatted | Should Match 'ExitCode'
         $formatted | Should Not Match 'Artifacts'
@@ -153,7 +155,6 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Not Match 'ComputerDirectory'
         $formatted | Should Not Match 'StdOutPath'
         $formatted | Should Not Match 'StdErrPath'
-        $formatted | Should Not Match 'Transport'
 
         $result.ResultPath | Should Be 'C:\WinPush\20260716-100000\PC01\run.log'
         $null -eq $result.StdOutPath | Should Be $true
@@ -169,11 +170,13 @@ Describe 'WinPush module import foundation' {
         $formatted = $result | Out-String -Width 220
 
         $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Transport'
         $formatted | Should Match 'Status'
         $formatted | Should Match 'ExitCode'
         $formatted | Should Match 'Script'
         $formatted | Should Match 'ErrorSummary'
         $formatted | Should Match 'PC01'
+        $formatted | Should Match 'Psrp'
         $formatted | Should Match 'OK'
         $formatted | Should Match 'Inventory.ps1'
         $formatted | Should Not Match 'Operation'
@@ -201,9 +204,32 @@ Describe 'WinPush module import foundation' {
 
         $formatted | Should Match 'ErrorSummary'
         $formatted | Should Match 'Failed'
-        $formatted | Should Match 'WinRM cannot complete the operation'
+        $formatted | Should Match 'WinRM connection failed'
         $normalized | Should Not Match 'Connecting to remote server JK148H4 failed'
         $normalized | Should Not Match 'firewall exception for the WinRM service is enabled'
+        $formatted | Should Not Match 'WinRM cannot complete the operation'
+        $formatted | Should Not Match 'ErrorMessage'
+    }
+
+    It 'formats Kerberos domain errors with a concise error summary' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $errorMessage = "Connecting to remote server 38W4FZ3 failed with the following error message : WinRM cannot process the request. The following error with errorcode 0x80090311 occurred while using Kerberos authentication: We can't sign you in with this credential because your domain isn't available. Make sure your device is connected to your organization's network and try again."
+        $result = New-TestExecutionResult `
+            -ComputerName '38W4FZ3' `
+            -Succeeded $false `
+            -ExitCode 1 `
+            -ErrorMessage $errorMessage `
+            -Errors @($errorMessage)
+
+        $formatted = $result | Out-String -Width 220
+        $normalized = $formatted -replace '\s+', ' '
+
+        $formatted | Should Match 'Transport'
+        $formatted | Should Match 'WinRM Kerberos authentication failed'
+        $normalized | Should Not Match 'domain isn''t available'
+        $normalized | Should Not Match 'Possible causes'
         $formatted | Should Not Match 'ErrorMessage'
     }
 
@@ -231,6 +257,7 @@ Describe 'WinPush module import foundation' {
         $formatted = $result | Out-String -Width 260
 
         $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Transport'
         $formatted | Should Match 'Status'
         $formatted | Should Match 'ExitCode'
         $formatted | Should Match 'Package'
@@ -238,6 +265,7 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'Logs'
         $formatted | Should Match 'ErrorSummary'
         $formatted | Should Match 'PC02'
+        $formatted | Should Match 'Psrp'
         $formatted | Should Match 'Agent.zip'
         $formatted | Should Match 'Retained'
         $formatted | Should Match 'No'
@@ -246,7 +274,6 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Not Match 'PackageMetadata'
         $formatted | Should Not Match 'RemoteStagePath'
         $formatted | Should Not Match 'CopiedLogPaths'
-        $formatted | Should Not Match 'Transport'
     }
 
     It 'formats CopyFile execution results as a copy table' {
@@ -265,18 +292,19 @@ Describe 'WinPush module import foundation' {
         $formatted = $result | Out-String -Width 260
 
         $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Transport'
         $formatted | Should Match 'Status'
         $formatted | Should Match 'Source'
         $formatted | Should Match 'Destination'
         $formatted | Should Match 'ErrorSummary'
         $formatted | Should Match 'PC03'
+        $formatted | Should Match 'Psrp'
         $formatted | Should Match ([regex]::Escape('C:\Packages\agent.msi'))
         $formatted | Should Match ([regex]::Escape('C:\Temp\agent.msi'))
         $formatted | Should Not Match 'Direction'
         $formatted | Should Not Match 'Length'
         $formatted | Should Not Match 'Details'
         $formatted | Should Not Match 'Artifacts'
-        $formatted | Should Not Match 'Transport'
     }
 
     It 'formats GetLogs execution results as a log table' {
@@ -308,19 +336,20 @@ Describe 'WinPush module import foundation' {
         $formatted = $result | Out-String -Width 260
 
         $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Transport'
         $formatted | Should Match 'Status'
         $formatted | Should Match 'LogPath'
         $formatted | Should Match 'Files'
         $formatted | Should Match 'Destination'
         $formatted | Should Match 'ErrorSummary'
         $formatted | Should Match 'PC04'
+        $formatted | Should Match 'Psrp'
         $formatted | Should Match ([regex]::Escape('C:\ProgramData\EA\Logs'))
         $formatted | Should Match '1'
         $formatted | Should Match ([regex]::Escape('C:\WinPush\run\PC04\Logs'))
         $formatted | Should Not Match 'Details'
         $formatted | Should Not Match 'Artifacts'
         $formatted | Should Not Match 'CopiedLogPaths'
-        $formatted | Should Not Match 'Transport'
     }
 
     It 'formats TestTarget execution results as a reachability table' {

@@ -134,9 +134,9 @@ Invoke-WinPushCommand -ComputerName PC01 -Command 'whoami'
 Expected result:
 
 ```text
-ComputerName Status ExitCode ErrorSummary
------------- ------ -------- ------------
-PC01         OK     0
+ComputerName Transport Status ExitCode ErrorSummary
+------------ -------- ------ -------- ------------
+PC01         Psrp     OK     0
 ```
 
 ## Command Summary
@@ -245,7 +245,7 @@ WinPush public commands return structured PowerShell objects with `PSTypeName = 
 | `StdErrPath` | `string` | Reserved for optional separate stderr diagnostics; blank for the default artifact contract. |
 | `Script` | `string` | Script file name for `Invoke-WinPushScript` results. Blank for other operations. |
 
-Default formatting displays compact per-command tables. Command and script rows show target status, exit code, and a short error summary without printing remote output. Package rows add package, cleanup, and log-copy columns. Copy, log, and target-test rows show only the fields needed to understand that operation. Full output, errors, logs, package metadata, and artifact paths remain available on the returned object with property access or `Format-List *`. When `-CaptureOutput` is used, detailed output and errors are also written to each target's `run.log`.
+Default formatting displays compact per-command tables. Every command summary includes the selected transport. Command and script rows show target status, exit code, and a short error summary without printing remote output. Package rows add package, cleanup, and log-copy columns. Copy, log, and target-test rows show only the fields needed to understand that operation. `ErrorSummary` is intentionally short; full output, full errors, logs, package metadata, and artifact paths remain available on the returned object with property access or `Format-List *`. When `-CaptureOutput` is used, detailed output and errors are also written to each target's `run.log`.
 
 Generated files, logs, reports, or receipts:
 
