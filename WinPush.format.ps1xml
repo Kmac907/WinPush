@@ -12,6 +12,7 @@
           <TableColumnHeader><Label>Transport</Label></TableColumnHeader>
           <TableColumnHeader><Label>Status</Label></TableColumnHeader>
           <TableColumnHeader><Label>ExitCode</Label></TableColumnHeader>
+          <TableColumnHeader><Label>OutputSummary</Label></TableColumnHeader>
           <TableColumnHeader><Label>ErrorSummary</Label></TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
@@ -21,6 +22,7 @@
               <TableColumnItem><PropertyName>Transport</PropertyName></TableColumnItem>
               <TableColumnItem><ScriptBlock>if ($_.Succeeded) { 'OK' } else { 'Failed' }</ScriptBlock></TableColumnItem>
               <TableColumnItem><PropertyName>ExitCode</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$summary = $null; foreach ($item in @($_.Output)) { if ($null -eq $item) { continue }; if (($item -isnot [string]) -and ($item -isnot [ValueType])) { continue }; $candidate = ([string] $item) -replace '\s+', ' '; $candidate = $candidate.Trim(); if (-not [string]::IsNullOrWhiteSpace($candidate)) { $summary = $candidate; break } }; if (-not [string]::IsNullOrWhiteSpace($summary)) { if ($summary.Length -gt 72) { $summary.Substring(0, 69) + '...' } else { $summary } }</ScriptBlock></TableColumnItem>
               <TableColumnItem><ScriptBlock>if (-not $_.Succeeded) { $message = if (-not [string]::IsNullOrWhiteSpace($_.ErrorMessage)) { [string] $_.ErrorMessage } elseif (@($_.Errors).Count -gt 0) { [string] @($_.Errors)[0] } else { $null }; if (-not [string]::IsNullOrWhiteSpace($message)) { $summary = $message -replace '\s+', ' '; if ($summary -match '(?i)we can''t sign you in with this credential because your domain isn''t available|errorcode 0x80090311|kerberos authentication') { 'WinRM Kerberos authentication failed' } elseif ($summary -match '(?i)server name cannot be resolved') { 'Server name cannot be resolved' } elseif ($summary -match '(?i)client cannot connect to the destination') { 'Client cannot connect to destination' } elseif ($summary -match '(?i)WinRM cannot complete the operation') { 'WinRM connection failed' } elseif ($summary -match '(?i)access is denied|access denied') { 'Access denied' } elseif ($summary -match '(?i)couldn''t access .+:') { 'PsExec cannot access target' } elseif ($summary -match '(?i)timed out|timeout') { 'Connection timed out' } elseif ($summary.Length -gt 72) { $summary.Substring(0, 69) + '...' } else { $summary } } }</ScriptBlock></TableColumnItem>
             </TableColumnItems>
           </TableRowEntry>

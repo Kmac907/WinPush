@@ -17,10 +17,10 @@ All public commands return structured `WinPush.ExecutionResult` objects. The def
 
 ```text
 Invoke-WinPushCommand
-ComputerName Transport Status ExitCode ErrorSummary
------------- -------- ------ -------- ------------
-PC01         Psrp     OK     0
-PC02         WinRM    Failed 1        Access denied
+ComputerName Transport Status ExitCode OutputSummary ErrorSummary
+------------ -------- ------ -------- ------------- ------------
+PC01         Psrp     OK     0        PC01
+PC02         WinRM    Failed 1                      Access denied
 
 Invoke-WinPushScript
 ComputerName Transport Status ExitCode Script        ErrorSummary
@@ -50,7 +50,7 @@ ComputerName Reachable Transport ErrorSummary
 PC01         True      Psrp
 ```
 
-`OutputPreview`, raw output, and artifact paths are not shown by default. Every command summary includes `Transport`. Successful rows leave `ErrorSummary` blank; failed rows show a short normalized summary. Full output, full errors, logs, metadata, and artifact paths remain on the returned object and are visible with property access or `Format-List *`. `-CaptureOutput` writes detailed command, script, or package output to the root correlated `run.log` and each per-target `run.log`.
+`OutputPreview`, raw multiline output, and artifact paths are not shown by default. Every command summary includes `Transport`. `Invoke-WinPushCommand` includes `OutputSummary`, a short first-value command-output summary. Successful rows leave `ErrorSummary` blank; failed rows show a short normalized summary. Full output, full errors, logs, metadata, and artifact paths remain on the returned object and are visible with property access or `Format-List *`. `-CaptureOutput` writes detailed command, script, or package output to the root correlated `run.log` and each per-target `run.log`.
 
 ## Parameters
 

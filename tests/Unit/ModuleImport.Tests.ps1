@@ -107,10 +107,12 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'Transport'
         $formatted | Should Match 'Status'
         $formatted | Should Match 'ExitCode'
+        $formatted | Should Match 'OutputSummary'
         $formatted | Should Match 'ErrorSummary'
         $formatted | Should Match 'PC01'
         $formatted | Should Match 'Psrp'
         $formatted | Should Match 'OK'
+        $formatted | Should Match 'first remote output'
         $formatted | Should Not Match 'Operation'
         $formatted | Should Not Match 'Details'
         $formatted | Should Not Match 'Artifacts'
@@ -118,7 +120,6 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Not Match 'Succeeded'
         $formatted | Should Not Match 'ErrorMessage'
         $formatted | Should Not Match 'OutputPreview'
-        $formatted | Should Not Match 'first remote output'
         $formatted | Should Not Match 'last remote output'
         $formatted | Should Not Match '^Output\s+:'
         $formatted | Should Not Match '^Errors\s+:'
@@ -131,6 +132,52 @@ Describe 'WinPush module import foundation' {
 
         ($result.Output -join ',') | Should Be 'first remote output,last remote output'
         $result.Transport | Should Be 'Psrp'
+    }
+
+    It 'summarizes multiline command output as one short line' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $result = New-TestExecutionResult -Output @("line one`nline two")
+
+        $formatted = $result | Out-String -Width 220
+
+        $formatted | Should Match 'OutputSummary'
+        $formatted | Should Match 'line one line two'
+        $formatted | Should Not Match "line one`r?`nline two"
+
+        $result.Output[0] | Should Be "line one`nline two"
+    }
+
+    It 'caps long command output summaries while preserving full output' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $longOutput = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-extra-output'
+        $expectedSummary = $longOutput.Substring(0, 69) + '...'
+        $result = New-TestExecutionResult -Output @($longOutput)
+
+        $formatted = $result | Out-String -Width 220
+
+        $formatted | Should Match ([regex]::Escape($expectedSummary))
+        $formatted | Should Not Match ([regex]::Escape($longOutput))
+
+        $result.Output[0] | Should Be $longOutput
+    }
+
+    It 'does not force structured command output into OutputSummary' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $structuredOutput = [pscustomobject] @{ Name = 'WinPushObjectValue' }
+        $result = New-TestExecutionResult -Output @($structuredOutput)
+
+        $formatted = $result | Out-String -Width 220
+
+        $formatted | Should Match 'OutputSummary'
+        $formatted | Should Not Match 'WinPushObjectValue'
+
+        $result.Output[0].Name | Should Be 'WinPushObjectValue'
     }
 
     It 'keeps artifact paths off the default command table while preserving result properties' {
@@ -147,8 +194,9 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'Transport'
         $formatted | Should Match 'Status'
         $formatted | Should Match 'ExitCode'
+        $formatted | Should Match 'OutputSummary'
         $formatted | Should Not Match 'Artifacts'
-        $formatted | Should Not Match 'captured remote output'
+        $formatted | Should Match 'captured remote output'
         $formatted | Should Not Match 'ResultPath'
         $formatted | Should Not Match 'run.log'
         $formatted | Should Not Match 'RunDirectory'
@@ -191,6 +239,7 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'ExitCode'
         $formatted | Should Match 'Script'
         $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Not Match 'OutputSummary'
         $formatted | Should Match 'PC01'
         $formatted | Should Match 'Psrp'
         $formatted | Should Match 'OK'
@@ -301,6 +350,7 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'Cleanup'
         $formatted | Should Match 'Logs'
         $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Not Match 'OutputSummary'
         $formatted | Should Match 'PC02'
         $formatted | Should Match 'Psrp'
         $formatted | Should Match 'Agent.zip'
@@ -334,6 +384,7 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'Source'
         $formatted | Should Match 'Destination'
         $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Not Match 'OutputSummary'
         $formatted | Should Match 'PC03'
         $formatted | Should Match 'Psrp'
         $formatted | Should Match ([regex]::Escape('C:\Packages\agent.msi'))
@@ -379,6 +430,7 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'Files'
         $formatted | Should Match 'Destination'
         $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Not Match 'OutputSummary'
         $formatted | Should Match 'PC04'
         $formatted | Should Match 'Psrp'
         $formatted | Should Match ([regex]::Escape('C:\ProgramData\EA\Logs'))
@@ -401,6 +453,7 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'Reachable'
         $formatted | Should Match 'Transport'
         $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Not Match 'OutputSummary'
         $formatted | Should Match 'PC05'
         $formatted | Should Match 'True'
         $formatted | Should Match 'Psrp'
