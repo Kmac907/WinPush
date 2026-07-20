@@ -67,7 +67,7 @@ Additional cleanup:
 
 ## Package Workflow
 
-`Invoke-WinPushPackage` currently stages one existing local package file or directory from the admin workstation to resolved direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP. It creates one remote staging directory per target under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It can also download one absolute URI package to the admin-workstation cache, then upload the cached package file to each resolved target through PSRP. When `-Extract` is supplied with a staged `.zip` package, each endpoint extracts the archive into its package staging directory and returns `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root and runs one package-relative PowerShell `.ps1` entry point per target. When `-CaptureOutput` is supplied, package entry-point output and errors are written to the same local artifact shape as command and script execution: one shared run-level `summary.csv` and one per-target `run.log`. When `-Logs` is supplied, immediate regular files are copied from `C:\ProgramData\EA\Logs\<entry-point-name>\` to the local target `Logs` folder. When `-Cleanup OnSuccess` or `-Cleanup Always` is supplied, the generated remote stage directory is removed after optional log collection. It returns one `WinPush.ExecutionResult` with `Operation = RunPackage` per resolved target.
+`Invoke-WinPushPackage` stages one existing local package file or directory from the admin workstation to resolved direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP. It creates one remote staging directory per target under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It can also download one absolute URI package to the admin-workstation cache, then upload the cached package file to each resolved target through PSRP. When `-Extract` is supplied with a staged `.zip` package, each endpoint extracts the archive into its package staging directory and returns `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root and runs one package-relative PowerShell `.ps1` entry point per target. When `-CaptureOutput` is supplied, package entry-point output and errors are written to the same local artifact shape as command and script execution: one shared run-level `summary.csv` and one per-target `run.log`. When `-Logs` is supplied, immediate regular files are copied from `C:\ProgramData\EA\Logs\<entry-point-name>\` to the local target `Logs` folder. When `-Cleanup OnSuccess` or `-Cleanup Always` is supplied, the generated remote stage directory is removed after optional log collection. It returns one `WinPush.ExecutionResult` with `Operation = RunPackage` per resolved target.
 
 Live package workflow validation is covered by the integration harness in `tests/Integration/Invoke-WinPushPackageLiveValidation.ps1`.
 
@@ -88,7 +88,7 @@ Package workflow results carry `PackageMetadata` on the returned `WinPush.Execut
 | `LogsCopied` | Whether package logs/results were copied. |
 | `CopiedLogPaths` | Local copied log/result paths. |
 
-Current local script-file package:
+Local script-file package:
 
 ```powershell
 Invoke-WinPushPackage `
@@ -97,7 +97,7 @@ Invoke-WinPushPackage `
     -EntryPoint .\Install-EA.ps1
 ```
 
-Current local directory package:
+Local directory package:
 
 ```powershell
 Invoke-WinPushPackage `
@@ -106,7 +106,7 @@ Invoke-WinPushPackage `
     -EntryPoint .\Install-EA.ps1
 ```
 
-Current local zip package with endpoint extraction:
+Local zip package with endpoint extraction:
 
 ```powershell
 Invoke-WinPushPackage `
@@ -116,7 +116,7 @@ Invoke-WinPushPackage `
     -Extract
 ```
 
-Current remote package source downloaded by the admin workstation first, then staged to the endpoint:
+Remote package source downloaded by the admin workstation first, then staged to the endpoint:
 
 ```powershell
 Invoke-WinPushPackage `
@@ -198,9 +198,9 @@ Defaults:
 - Cleanup defaults to `Never`.
 - Initial entry points are PowerShell `.ps1` files only.
 - Endpoints do not download package URIs directly.
-- The first package workflow scope does not include package integrity switches, native `.exe` or `.cmd` entry points, package manifests, retries, parallel execution, or recursive log copy beyond the approved log behavior.
+- Package workflow does not include package integrity switches, native `.exe` or `.cmd` entry points, package manifests, retries, parallel execution, or recursive log copy beyond the approved log behavior.
 
-Current limitations:
+Package rules:
 
 - Local files, local directories, and cached URI package files are staged to endpoints.
 - Staged `.zip` package files can be extracted on the endpoint with `-Extract`; non-zip files and directory packages are rejected for extraction.

@@ -220,3 +220,18 @@ Invoke-WinPushScript `
     -Logs `
     -OutputRoot $OutputRoot
 ```
+
+## Package Workflow
+
+Stage a local package directory, run a package-relative PowerShell entry point, capture output, copy package logs, and remove the remote stage after success:
+
+```powershell
+Invoke-WinPushPackage `
+    -ComputerName $ComputerName `
+    -Path .\EAInstallPackage `
+    -EntryPoint .\Install-EA.ps1 `
+    -CaptureOutput `
+    -Logs `
+    -Cleanup OnSuccess `
+    -OutputRoot $OutputRoot
+```
