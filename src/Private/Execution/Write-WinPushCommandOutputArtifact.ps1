@@ -105,6 +105,94 @@ function Write-WinPushResultArtifact {
     [System.IO.File]::WriteAllLines($ResultPath, $resultLines, $Encoding)
 }
 
+function Write-WinPushCorrelatedRunLogArtifact {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $RunLogPath,
+
+        [Parameter(Mandatory)]
+        [string] $ComputerName,
+
+        [string] $Operation = '',
+
+        [string] $Transport = '',
+
+        [string] $ArtifactIdentity = '',
+
+        [AllowNull()]
+        [bool] $Succeeded,
+
+        [AllowNull()]
+        [int] $ExitCode,
+
+        [AllowNull()]
+        [string] $ErrorMessage = $null,
+
+        [AllowNull()]
+        [object[]] $Output = @(),
+
+        [AllowNull()]
+        [object[]] $Errors = @(),
+
+        [Parameter(Mandatory)]
+        [string] $TargetResultPath,
+
+        [Parameter(Mandatory)]
+        [System.Text.Encoding] $Encoding
+    )
+
+    [string[]] $targetLines = @(
+        'Target Result'
+        '============='
+        ''
+        ('Timestamp    : {0}' -f (Get-Date -Format 'o'))
+        ('ComputerName : {0}' -f $ComputerName)
+        ('Operation    : {0}' -f (ConvertTo-WinPushResultArtifactValue -Value $Operation))
+        ('Transport    : {0}' -f (ConvertTo-WinPushResultArtifactValue -Value $Transport))
+        ('Identity     : {0}' -f (ConvertTo-WinPushResultArtifactValue -Value $ArtifactIdentity))
+        ('Succeeded    : {0}' -f (ConvertTo-WinPushResultArtifactValue -Value $Succeeded))
+        ('ExitCode     : {0}' -f (ConvertTo-WinPushResultArtifactValue -Value $ExitCode))
+        ('ErrorMessage : {0}' -f (ConvertTo-WinPushResultArtifactValue -Value $ErrorMessage))
+        ('TargetRunLog : {0}' -f (ConvertTo-WinPushResultArtifactValue -Value $TargetResultPath))
+        ''
+        'Output:'
+        (ConvertTo-WinPushCommandArtifactText -Value $Output)
+        ''
+        'Errors:'
+        (ConvertTo-WinPushCommandArtifactText -Value $Errors)
+        ''
+        'ErrorMessage Detail:'
+        (ConvertTo-WinPushResultArtifactValue -Value $ErrorMessage)
+    )
+
+    if (Test-Path -LiteralPath $RunLogPath -PathType Leaf) {
+        $appendLines = [string[]] @(
+            ''
+            '---'
+            ''
+        ) + $targetLines
+        $writer = [System.IO.StreamWriter]::new($RunLogPath, $true, $Encoding)
+        try {
+            foreach ($line in $appendLines) {
+                $writer.WriteLine($line)
+            }
+        }
+        finally {
+            $writer.Dispose()
+        }
+        return
+    }
+
+    [string[]] $runLines = @(
+        'WinPush Correlated Run Log'
+        '=========================='
+        ''
+    ) + $targetLines
+
+    [System.IO.File]::WriteAllLines($RunLogPath, $runLines, $Encoding)
+}
+
 function Write-WinPushSummaryArtifact {
     [CmdletBinding()]
     param(
@@ -211,6 +299,7 @@ function Write-WinPushCommandOutputArtifact {
 
     $computerDirectory = Join-Path -Path $runDirectory -ChildPath $ComputerName
     $summaryPath = Join-Path -Path $runDirectory -ChildPath 'summary.csv'
+    $runLogPath = Join-Path -Path $runDirectory -ChildPath 'run.log'
     $resultPath = Join-Path -Path $computerDirectory -ChildPath 'run.log'
 
     $null = New-Item -Path $computerDirectory -ItemType Directory -Force
@@ -229,6 +318,19 @@ function Write-WinPushCommandOutputArtifact {
         -Output $Output `
         -Errors $Errors `
         -Encoding $utf8NoBom
+    Write-WinPushCorrelatedRunLogArtifact `
+        -RunLogPath $runLogPath `
+        -ComputerName $ComputerName `
+        -Operation $Operation `
+        -Transport $Transport `
+        -ArtifactIdentity $ArtifactIdentity `
+        -Succeeded $Succeeded `
+        -ExitCode $ExitCode `
+        -ErrorMessage $ErrorMessage `
+        -Output $Output `
+        -Errors $Errors `
+        -TargetResultPath $resultPath `
+        -Encoding $utf8NoBom
     Write-WinPushSummaryArtifact `
         -SummaryPath $summaryPath `
         -ComputerName $ComputerName `
@@ -244,6 +346,7 @@ function Write-WinPushCommandOutputArtifact {
         ComputerDirectory = $computerDirectory
         ResultPath        = $resultPath
         SummaryPath       = $summaryPath
+        RunLogPath        = $runLogPath
         StdOutPath        = $null
         StdErrPath        = $null
     }

@@ -893,6 +893,15 @@ Describe 'Invoke-WinPushScript' {
         $resultText | Should Match 'Errors:'
         $resultText | Should Not Match 'StdOutPath'
         $resultText | Should Not Match 'StdErrPath'
+        $runLogPath = Join-Path -Path $result.RunDirectory -ChildPath 'run.log'
+        Test-Path -LiteralPath $runLogPath -PathType Leaf | Should Be $true
+        $runLogText = Get-Content -LiteralPath $runLogPath -Raw
+        $runLogText | Should Match 'WinPush Correlated Run Log'
+        $runLogText | Should Match 'Target Result'
+        $runLogText | Should Match 'ComputerName : PC-001'
+        $runLogText | Should Match ([regex]::Escape("TargetRunLog : $($result.ResultPath)"))
+        $runLogText | Should Match 'first line'
+        $runLogText | Should Match 'second line'
         $summaryPath = Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'
         Test-Path -LiteralPath $summaryPath -PathType Leaf | Should Be $true
         $summaryRows = @(Import-Csv -LiteralPath $summaryPath)
@@ -955,6 +964,12 @@ Describe 'Invoke-WinPushScript' {
         ($summaryRows.ResultPath -join ',') | Should Be (($results[0].ResultPath, $results[1].ResultPath) -join ',')
         ($summaryRows.StdOutPath -join ',') | Should Be ','
         ($summaryRows.StdErrPath -join ',') | Should Be ','
+        $runLogText = Get-Content -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'run.log') -Raw
+        $runLogText | Should Match 'WinPush Correlated Run Log'
+        $runLogText | Should Match 'ComputerName : PC-001'
+        $runLogText | Should Match 'ComputerName : PC-002'
+        $runLogText | Should Match 'first target'
+        $runLogText | Should Match 'second target'
     }
 
     It 'captures pipeline ComputerName output under one shared run folder' {
@@ -1172,6 +1187,31 @@ Describe 'Invoke-WinPushScript' {
         $summaryRows[0].ResultPath | Should Be $result.ResultPath
         $summaryRows[0].StdOutPath | Should Be ''
         $summaryRows[0].StdErrPath | Should Be ''
+    }
+
+    It 'filters PsExec status stderr on successful scripts while preserving real stderr' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-script-status.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $script:NativeProcessStandardOutput = "script output`r`n"
+        $script:NativeProcessStandardError = @(
+            'PsExec v2.43 - Execute processes remotely'
+            'Copyright (C) 2001-2023 Mark Russinovich'
+            'Sysinternals - www.sysinternals.com'
+            ''
+            'Connecting to PC-001...'
+            'Starting PSEXESVC service on PC-001...'
+            'Connecting with PsExec service on PC-001...'
+            'cmd.exe exited on PC-001 with error code 0.'
+            'script stderr'
+            ''
+        ) -join "`r`n"
+
+        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport PsExec -PsExecPath $psExecPath
+
+        $result.Succeeded | Should Be $true
+        $result.ErrorMessage | Should BeNullOrEmpty
+        @($result.Errors).Count | Should Be 1
+        $result.Errors[0] | Should Be 'script stderr'
     }
 
     It 'keeps the staged native script when requested' {

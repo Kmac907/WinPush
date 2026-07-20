@@ -50,7 +50,7 @@ ComputerName Reachable Transport ErrorSummary
 PC01         True      Psrp
 ```
 
-`OutputPreview`, raw output, and artifact paths are not shown by default. Every command summary includes `Transport`. `ErrorSummary` is intentionally short; full output, full errors, logs, metadata, and artifact paths remain on the returned object and are visible with property access or `Format-List *`. `-CaptureOutput` writes detailed command, script, or package output to the per-target `run.log`.
+`OutputPreview`, raw output, and artifact paths are not shown by default. Every command summary includes `Transport`. Successful rows leave `ErrorSummary` blank; failed rows show a short normalized summary. Full output, full errors, logs, metadata, and artifact paths remain on the returned object and are visible with property access or `Format-List *`. `-CaptureOutput` writes detailed command, script, or package output to the root correlated `run.log` and each per-target `run.log`.
 
 ## Parameters
 
@@ -76,7 +76,7 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 | `-Transport` | `Psrp`, `WinRM`, `PsExec` | Optional. Defaults to `Psrp`. |
 | `-PsExecPath` | `string` | Optional path to `PsExec.exe`; only valid with `-Transport PsExec`. |
 | `-Credential` | `PSCredential` | Optional PSRP credential. Not supported with `WinRM` or `PsExec`. |
-| `-CaptureOutput` | switch | Writes one run-level `summary.csv` and one per-target `run.log`. Supported with every transport. |
+| `-CaptureOutput` | switch | Writes one run-level `summary.csv`, one root correlated `run.log`, and one per-target `run.log`. Supported with every transport. |
 | `-Logs` | switch | Copies convention-based command logs. Not supported with `WinRM` or `PsExec`. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
 
@@ -92,7 +92,7 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 | `-Transport` | `Psrp`, `WinRM`, `PsExec` | Optional. Defaults to `Psrp`. |
 | `-PsExecPath` | `string` | Optional path to `PsExec.exe`; only valid with `-Transport PsExec`. |
 | `-Credential` | `PSCredential` | Optional PSRP credential. Not supported with `WinRM` or `PsExec`. |
-| `-CaptureOutput` | switch | Writes one run-level `summary.csv` and one per-target `run.log`. Supported with every transport. |
+| `-CaptureOutput` | switch | Writes one run-level `summary.csv`, one root correlated `run.log`, and one per-target `run.log`. Supported with every transport. |
 | `-Logs` | switch | Copies convention-based script logs. Not supported with `WinRM` or `PsExec`. |
 | `-KeepStagedScript` | switch | Leaves the staged native-transport script folder on the target for troubleshooting. Native script staging is removed by default. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
@@ -125,7 +125,7 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 
 ### `Invoke-WinPushPackage`
 
-Package support stages one existing local package file or directory to resolved direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP. Directory packages are staged recursively beneath each remote package root while preserving package-relative file layout. URI package sources are downloaded once to the local admin-workstation cache, then the cached package file is staged to each resolved target. When `-Extract` is supplied with a staged `.zip` package, each endpoint extracts the archive into its package staging directory and sets `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root, runs one package-relative PowerShell `.ps1` entry point, retains entry-point output and errors in each returned result, records execution timestamps in `PackageMetadata`, writes one shared package `summary.csv` plus one per-target `run.log` when `-CaptureOutput` is supplied, copies convention-based package logs when `-Logs` is supplied, and applies the requested remote staged-package cleanup policy after optional logs.
+Package support stages one existing local package file or directory to resolved direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP. Directory packages are staged recursively beneath each remote package root while preserving package-relative file layout. URI package sources are downloaded once to the local admin-workstation cache, then the cached package file is staged to each resolved target. When `-Extract` is supplied with a staged `.zip` package, each endpoint extracts the archive into its package staging directory and sets `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root, runs one package-relative PowerShell `.ps1` entry point, retains entry-point output and errors in each returned result, records execution timestamps in `PackageMetadata`, writes one shared package `summary.csv`, one root correlated `run.log`, and one per-target `run.log` when `-CaptureOutput` is supplied, copies convention-based package logs when `-Logs` is supplied, and applies the requested remote staged-package cleanup policy after optional logs.
 
 | Parameter | Argument | Notes |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ Package support stages one existing local package file or directory to resolved 
 | `-Uri` | `uri` | Absolute remote package source downloaded to the admin-workstation cache before endpoint staging. Mutually exclusive with `-Path`. |
 | `-EntryPoint` | `string` | PowerShell `.ps1` package entry point relative to the staged package root. Required. |
 | `-Extract` | switch | Extracts staged `.zip` package files on the endpoint into the package staging directory. Non-zip files and directory packages are rejected. |
-| `-CaptureOutput` | switch | Writes one run-level `summary.csv` and one per-target `run.log` for package output and errors. |
+| `-CaptureOutput` | switch | Writes one run-level `summary.csv`, one root correlated `run.log`, and one per-target `run.log` for package output and errors. |
 | `-Logs` | switch | Copies immediate regular files from `C:\ProgramData\EA\Logs\<entry-point-name>\`, where `<entry-point-name>` is the package entry point base name. |
 | `-Cleanup` | `Never`, `OnSuccess`, `Always` | Remote staged-package cleanup policy. Defaults to `Never`; `OnSuccess` removes staged files after successful package execution, and `Always` removes staged files after success or failure when a stage exists. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |

@@ -161,6 +161,22 @@ Describe 'WinPush module import foundation' {
         $null -eq $result.StdErrPath | Should Be $true
     }
 
+    It 'keeps successful result errors out of the default error summary' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $result = New-TestExecutionResult -Errors @('Connecting to PC01...', 'remote warning')
+
+        $formatted = $result | Out-String -Width 220
+
+        $formatted | Should Match 'OK'
+        $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Not Match 'Connecting to PC01'
+        $formatted | Should Not Match 'remote warning'
+
+        ($result.Errors -join ',') | Should Be 'Connecting to PC01...,remote warning'
+    }
+
     It 'formats RunScript execution results as a concise script table' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
@@ -231,6 +247,27 @@ Describe 'WinPush module import foundation' {
         $normalized | Should Not Match 'domain isn''t available'
         $normalized | Should Not Match 'Possible causes'
         $formatted | Should Not Match 'ErrorMessage'
+    }
+
+    It 'formats PsExec access failures with a concise error summary' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $errorMessage = "Couldn't access 38W4FZ3:"
+        $result = New-TestExecutionResult `
+            -ComputerName '38W4FZ3' `
+            -Succeeded $false `
+            -ExitCode 6 `
+            -ErrorMessage $errorMessage `
+            -Errors @('', '', "Couldn't access 38W4FZ3:", 'The handle is invalid.')
+
+        $formatted = $result | Out-String -Width 220
+
+        $formatted | Should Match 'PsExec cannot access target'
+        $formatted | Should Not Match "Couldn't access"
+        $formatted | Should Not Match 'The handle is invalid'
+
+        $result.ErrorMessage | Should Be $errorMessage
     }
 
     It 'formats RunPackage execution results as a package table' {

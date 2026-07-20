@@ -775,6 +775,15 @@ Describe 'Invoke-WinPushCommand' {
         $resultText | Should Match 'Errors:'
         $resultText | Should Not Match 'StdOutPath'
         $resultText | Should Not Match 'StdErrPath'
+        $runLogPath = Join-Path -Path $result.RunDirectory -ChildPath 'run.log'
+        Test-Path -LiteralPath $runLogPath -PathType Leaf | Should Be $true
+        $runLogText = Get-Content -LiteralPath $runLogPath -Raw
+        $runLogText | Should Match 'WinPush Correlated Run Log'
+        $runLogText | Should Match 'Target Result'
+        $runLogText | Should Match 'ComputerName : PC-001'
+        $runLogText | Should Match ([regex]::Escape("TargetRunLog : $($result.ResultPath)"))
+        $runLogText | Should Match 'first line'
+        $runLogText | Should Match 'second line'
         $summaryPath = Join-Path -Path $result.RunDirectory -ChildPath 'summary.csv'
         Test-Path -LiteralPath $summaryPath -PathType Leaf | Should Be $true
         $summaryRows = @(Import-Csv -LiteralPath $summaryPath)
@@ -838,6 +847,12 @@ Describe 'Invoke-WinPushCommand' {
         ($summaryRows.ResultPath -join ',') | Should Be (($results[0].ResultPath, $results[1].ResultPath) -join ',')
         ($summaryRows.StdOutPath -join ',') | Should Be ','
         ($summaryRows.StdErrPath -join ',') | Should Be ','
+        $runLogText = Get-Content -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'run.log') -Raw
+        $runLogText | Should Match 'WinPush Correlated Run Log'
+        $runLogText | Should Match 'ComputerName : PC-001'
+        $runLogText | Should Match 'ComputerName : PC-002'
+        $runLogText | Should Match 'first target'
+        $runLogText | Should Match 'second target'
     }
 
     It 'captures pipeline ComputerName output under one shared run folder' {
@@ -1196,6 +1211,31 @@ Describe 'Invoke-WinPushCommand' {
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
+    It 'filters PsExec status stderr on successful commands while preserving real stderr' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-status.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $script:NativeProcessStandardOutput = "native output`r`n"
+        $script:NativeProcessStandardError = @(
+            'PsExec v2.43 - Execute processes remotely'
+            'Copyright (C) 2001-2023 Mark Russinovich'
+            'Sysinternals - www.sysinternals.com'
+            ''
+            'Connecting to PC-001...'
+            'Starting PSEXESVC service on PC-001...'
+            'Connecting with PsExec service on PC-001...'
+            'cmd.exe exited on PC-001 with error code 0.'
+            'remote stderr'
+            ''
+        ) -join "`r`n"
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath
+
+        $result.Succeeded | Should Be $true
+        $result.ErrorMessage | Should BeNullOrEmpty
+        @($result.Errors).Count | Should Be 1
+        $result.Errors[0] | Should Be 'remote stderr'
+    }
+
     It 'rejects PsExec attached logs before launching a native process' {
         $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-logs.exe'
         Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
@@ -1349,6 +1389,26 @@ Describe 'Invoke-WinPushCommand' {
         $result.Errors[1] | Should Be 'psexec error  '
         $result.Errors[2] | Should Be 'more detail'
         ($script:NativeProcessArgumentLists[0] -join '|') | Should Be '\\PC-001|-h|cmd.exe|/d|/s|/c|hostname'
+    }
+
+    It 'filters PsExec status stderr before choosing the failure error message' {
+        $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-failed-status.exe'
+        Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+        $script:NativeProcessExitCode = 6
+        $script:NativeProcessStandardError = @(
+            'Connecting to PC-001...'
+            ''
+            "Couldn't access PC-001:"
+            'The handle is invalid.'
+            'Connecting to PC-001...'
+        ) -join "`r`n"
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport PsExec -PsExecPath $psExecPath
+
+        $result.Succeeded | Should Be $false
+        $result.ExitCode | Should Be 6
+        $result.ErrorMessage | Should Be "Couldn't access PC-001:"
+        ($result.Errors -join '|') | Should Be "|Couldn't access PC-001:|The handle is invalid."
     }
 
     It 'uses a deterministic PsExec error message when a nonzero exit has no stderr' {

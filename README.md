@@ -245,13 +245,14 @@ WinPush public commands return structured PowerShell objects with `PSTypeName = 
 | `StdErrPath` | `string` | Reserved for optional separate stderr diagnostics; blank for the default artifact contract. |
 | `Script` | `string` | Script file name for `Invoke-WinPushScript` results. Blank for other operations. |
 
-Default formatting displays compact per-command tables. Every command summary includes the selected transport. Command and script rows show target status, exit code, and a short error summary without printing remote output. Package rows add package, cleanup, and log-copy columns. Copy, log, and target-test rows show only the fields needed to understand that operation. `ErrorSummary` is intentionally short; full output, full errors, logs, package metadata, and artifact paths remain available on the returned object with property access or `Format-List *`. When `-CaptureOutput` is used, detailed output and errors are also written to each target's `run.log`.
+Default formatting displays compact per-command tables. Every command summary includes the selected transport. Successful rows leave `ErrorSummary` blank; failed rows show a short normalized summary. Command and script rows do not print remote output. Package rows add package, cleanup, and log-copy columns. Full output, full errors, logs, package metadata, and artifact paths remain available on the returned object with property access or `Format-List *`. When `-CaptureOutput` is used, detailed output and errors are written to root and per-target `run.log` files.
 
 Generated files, logs, reports, or receipts:
 
 | Artifact | Location | Purpose | Retention |
 | --- | --- | --- | --- |
 | Run summary | `<OutputRoot>\<timestamp>\summary.csv` | Run-level CSV summary for captured command, script, or package output. | Operator controlled. |
+| Correlated run log | `<OutputRoot>\<timestamp>\run.log` | Human-readable run log with one section per endpoint and links to each target log. | Operator controlled. |
 | Per-target run log | `<OutputRoot>\<timestamp>\<ComputerName>\run.log` | Human-readable per-target status, command/script/package identity, output, and errors. | Operator controlled. |
 | Copied logs | `<OutputRoot>\<timestamp>\<ComputerName>\Logs\` | Immediate files copied from documented remote log directories. | Operator controlled. |
 

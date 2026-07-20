@@ -504,6 +504,12 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $runLog | Should Match ([regex]::Escape("Identity     : Path: $resolvedPackagePath; EntryPoint: .\Install-EA.ps1"))
         $runLog | Should Match ([regex]::Escape('Succeeded    : True'))
         $runLog | Should Match ([regex]::Escape('ExitCode     : 0'))
+        $correlatedRunLog = Get-Content -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'run.log') -Raw
+        $correlatedRunLog | Should Match 'WinPush Correlated Run Log'
+        $correlatedRunLog | Should Match 'Target Result'
+        $correlatedRunLog | Should Match 'ComputerName : PC-001'
+        $correlatedRunLog | Should Match ([regex]::Escape("TargetRunLog : $($result.ResultPath)"))
+        $correlatedRunLog | Should Match 'package output'
         $runLog | Should Match ([regex]::Escape('Output:'))
         $runLog | Should Match ([regex]::Escape('package output'))
         $runLog | Should Match ([regex]::Escape('Errors:'))
@@ -1280,6 +1286,10 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         ($summaryRows.ComputerName -join ',') | Should Be 'PC-001,PC-002'
         ($summaryRows.Operation -join ',') | Should Be 'RunPackage,RunPackage'
         ($summaryRows.ResultPath -join ',') | Should Be (($results[0].ResultPath, $results[1].ResultPath) -join ',')
+        $correlatedRunLog = Get-Content -LiteralPath (Join-Path -Path $results[0].RunDirectory -ChildPath 'run.log') -Raw
+        $correlatedRunLog | Should Match 'WinPush Correlated Run Log'
+        $correlatedRunLog | Should Match 'ComputerName : PC-001'
+        $correlatedRunLog | Should Match 'ComputerName : PC-002'
     }
 
     It 'copies direct ComputerName package logs under one shared run folder' {
