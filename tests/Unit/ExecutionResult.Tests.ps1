@@ -16,6 +16,31 @@ Describe 'New-WinPushExecutionResult' {
         ($propertyNames -contains 'Password') | Should Be $false
     }
 
+    It 'keeps the primary result type and appends operation-specific display types' {
+        $operationTypes = @{
+            RunCommand = 'WinPush.ExecutionResult.RunCommand'
+            RunScript  = 'WinPush.ExecutionResult.RunScript'
+            RunPackage = 'WinPush.ExecutionResult.RunPackage'
+            CopyFile   = 'WinPush.ExecutionResult.CopyFile'
+            GetLogs    = 'WinPush.ExecutionResult.GetLogs'
+            TestTarget = 'WinPush.ExecutionResult.TestTarget'
+        }
+
+        foreach ($operation in $operationTypes.Keys) {
+            $result = New-WinPushExecutionResult -ComputerName 'PC-001' -Transport 'PSRP' -Operation $operation -Succeeded $true -ExitCode 0
+
+            $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
+            $result.PSTypeNames[1] | Should Be $operationTypes[$operation]
+        }
+    }
+
+    It 'does not append operation-specific display types for unknown operations' {
+        $result = New-WinPushExecutionResult -ComputerName 'PC-001' -Transport 'PSRP' -Operation 'Invoke' -Succeeded $true -ExitCode 0
+
+        $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
+        ($result.PSTypeNames -contains 'WinPush.ExecutionResult.Invoke') | Should Be $false
+    }
+
     It 'captures a successful execution result' {
         $result = New-WinPushExecutionResult -ComputerName 'PC-001' -Transport 'PSRP' -Operation 'Invoke' -Succeeded $true -ExitCode 0 -Output 'done' -Logs 'started'
 

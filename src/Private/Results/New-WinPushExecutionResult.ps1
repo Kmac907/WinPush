@@ -81,7 +81,7 @@ function New-WinPushExecutionResult {
     $normalizedStdOutPath = if ([string]::IsNullOrWhiteSpace($StdOutPath)) { $null } else { $StdOutPath }
     $normalizedStdErrPath = if ([string]::IsNullOrWhiteSpace($StdErrPath)) { $null } else { $StdErrPath }
 
-    [pscustomobject] [ordered] @{
+    $result = [pscustomobject] [ordered] @{
         PSTypeName        = 'WinPush.ExecutionResult'
         ComputerName      = $ComputerName
         Transport         = $Transport
@@ -100,4 +100,20 @@ function New-WinPushExecutionResult {
         CopiedLogPaths    = $normalizedCopiedLogPaths
         PackageMetadata   = $PackageMetadata
     }
+
+    $operationTypeName = switch ($Operation) {
+        'RunCommand' { 'WinPush.ExecutionResult.RunCommand' }
+        'RunScript' { 'WinPush.ExecutionResult.RunScript' }
+        'RunPackage' { 'WinPush.ExecutionResult.RunPackage' }
+        'CopyFile' { 'WinPush.ExecutionResult.CopyFile' }
+        'GetLogs' { 'WinPush.ExecutionResult.GetLogs' }
+        'TestTarget' { 'WinPush.ExecutionResult.TestTarget' }
+        default { $null }
+    }
+
+    if ($null -ne $operationTypeName) {
+        $result.PSTypeNames.Insert(1, $operationTypeName)
+    }
+
+    $result
 }

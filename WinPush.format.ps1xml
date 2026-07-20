@@ -2,58 +2,158 @@
 <Configuration>
   <ViewDefinitions>
     <View>
-      <Name>WinPush.ExecutionResult.Status</Name>
+      <Name>WinPush.ExecutionResult.RunCommand.Status</Name>
       <ViewSelectedBy>
-        <TypeName>WinPush.ExecutionResult</TypeName>
+        <TypeName>WinPush.ExecutionResult.RunCommand</TypeName>
       </ViewSelectedBy>
       <TableControl>
         <TableHeaders>
-          <TableColumnHeader>
-            <Label>ComputerName</Label>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>Status</Label>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>Operation</Label>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>ExitCode</Label>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>Details</Label>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>Artifacts</Label>
-          </TableColumnHeader>
-          <TableColumnHeader>
-            <Label>ErrorSummary</Label>
-          </TableColumnHeader>
+          <TableColumnHeader><Label>ComputerName</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ExitCode</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ErrorSummary</Label></TableColumnHeader>
         </TableHeaders>
         <TableRowEntries>
           <TableRowEntry>
             <TableColumnItems>
-              <TableColumnItem>
-                <PropertyName>ComputerName</PropertyName>
-              </TableColumnItem>
-              <TableColumnItem>
-                <ScriptBlock>if ($_.Succeeded) { 'OK' } else { 'Failed' }</ScriptBlock>
-              </TableColumnItem>
-              <TableColumnItem>
-                <PropertyName>Operation</PropertyName>
-              </TableColumnItem>
-              <TableColumnItem>
-                <PropertyName>ExitCode</PropertyName>
-              </TableColumnItem>
-              <TableColumnItem>
-                <ScriptBlock>$result = $_; switch ($result.Operation) { 'RunPackage' { $metadata = $result.PackageMetadata; if ($null -ne $metadata) { $package = if (-not [string]::IsNullOrWhiteSpace($metadata.PackageSource)) { [System.IO.Path]::GetFileName(([string] $metadata.PackageSource).TrimEnd('\', '/')) }; if ([string]::IsNullOrWhiteSpace($package)) { $package = [string] $metadata.PackageSource }; $cleanup = if ($metadata.CleanupPolicy -eq 'Never') { 'Cleanup: Retained' } elseif ($metadata.CleanupSucceeded -eq $true) { 'Cleanup: Removed' } elseif ($metadata.CleanupSucceeded -eq $false) { 'Cleanup: Failed' } else { $null }; $logs = if ($metadata.LogsCopied -eq $true -or @($metadata.CopiedLogPaths).Count -gt 0) { 'Logs: Yes' } else { 'Logs: No' }; @($package, $cleanup, $logs) -ne $null -join '; ' } } 'CopyFile' { $copy = @($result.Output)[0]; if ($null -ne $copy -and -not [string]::IsNullOrWhiteSpace($copy.Direction)) { $name = if (-not [string]::IsNullOrWhiteSpace($copy.FileName)) { $copy.FileName } else { [System.IO.Path]::GetFileName(([string] $copy.Source).TrimEnd('\', '/')) }; if ([string]::IsNullOrWhiteSpace($name)) { $name = [string] $copy.Source }; '{0}: {1} -&gt; {2}' -f $copy.Direction, $name, $copy.Destination } } 'GetLogs' { $copied = @($result.CopiedLogPaths).Count; $logs = @($result.Logs).Count; if ($copied -gt 0) { '{0} log(s) copied' -f $copied } elseif ($logs -gt 0) { '{0} log result(s)' -f $logs } } 'TestTarget' { if ($result.Succeeded) { 'Session created' } else { 'Session failed' } } }</ScriptBlock>
-              </TableColumnItem>
-              <TableColumnItem>
-                <ScriptBlock>if (-not [string]::IsNullOrWhiteSpace($_.ResultPath)) { 'Yes' }</ScriptBlock>
-              </TableColumnItem>
-              <TableColumnItem>
-                <ScriptBlock>$message = if (-not [string]::IsNullOrWhiteSpace($_.ErrorMessage)) { [string] $_.ErrorMessage } elseif (@($_.Errors).Count -gt 0) { [string] @($_.Errors)[0] } else { $null }; if (-not [string]::IsNullOrWhiteSpace($message)) { $summary = $message -replace '\s+', ' '; if ($summary -match 'server name cannot be resolved') { 'Server name cannot be resolved' } elseif ($summary -match 'client cannot connect to the destination') { 'Client cannot connect to destination' } elseif ($summary -match '(?i)access is denied|access denied') { 'Access denied' } elseif ($summary -match 'WinRM cannot complete the operation') { 'WinRM cannot complete the operation' } elseif ($summary.Length -gt 100) { $summary.Substring(0, 97) + '...' } else { $summary } }</ScriptBlock>
-              </TableColumnItem>
+              <TableColumnItem><PropertyName>ComputerName</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($_.Succeeded) { 'OK' } else { 'Failed' }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><PropertyName>ExitCode</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$message = if (-not [string]::IsNullOrWhiteSpace($_.ErrorMessage)) { [string] $_.ErrorMessage } elseif (@($_.Errors).Count -gt 0) { [string] @($_.Errors)[0] } else { $null }; if (-not [string]::IsNullOrWhiteSpace($message)) { $summary = $message -replace '\s+', ' '; if ($summary -match 'server name cannot be resolved') { 'Server name cannot be resolved' } elseif ($summary -match 'client cannot connect to the destination') { 'Client cannot connect to destination' } elseif ($summary -match '(?i)access is denied|access denied') { 'Access denied' } elseif ($summary -match 'WinRM cannot complete the operation') { 'WinRM cannot complete the operation' } elseif ($summary.Length -gt 100) { $summary.Substring(0, 97) + '...' } else { $summary } }</ScriptBlock></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>WinPush.ExecutionResult.RunScript.Status</Name>
+      <ViewSelectedBy>
+        <TypeName>WinPush.ExecutionResult.RunScript</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>ComputerName</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ExitCode</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Script</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ErrorSummary</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>ComputerName</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($_.Succeeded) { 'OK' } else { 'Failed' }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><PropertyName>ExitCode</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$metadata = @($_.Output)[0]; if ($null -ne $metadata) { if ($metadata.PSObject.Properties['Script']) { [string] $metadata.Script } elseif ($metadata.PSObject.Properties['ScriptPath']) { [System.IO.Path]::GetFileName(([string] $metadata.ScriptPath).TrimEnd('\', '/')) } }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$message = if (-not [string]::IsNullOrWhiteSpace($_.ErrorMessage)) { [string] $_.ErrorMessage } elseif (@($_.Errors).Count -gt 0) { [string] @($_.Errors)[0] } else { $null }; if (-not [string]::IsNullOrWhiteSpace($message)) { $summary = $message -replace '\s+', ' '; if ($summary -match 'server name cannot be resolved') { 'Server name cannot be resolved' } elseif ($summary -match 'client cannot connect to the destination') { 'Client cannot connect to destination' } elseif ($summary -match '(?i)access is denied|access denied') { 'Access denied' } elseif ($summary -match 'WinRM cannot complete the operation') { 'WinRM cannot complete the operation' } elseif ($summary.Length -gt 100) { $summary.Substring(0, 97) + '...' } else { $summary } }</ScriptBlock></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>WinPush.ExecutionResult.RunPackage.Status</Name>
+      <ViewSelectedBy>
+        <TypeName>WinPush.ExecutionResult.RunPackage</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>ComputerName</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ExitCode</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Package</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Cleanup</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Logs</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ErrorSummary</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>ComputerName</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($_.Succeeded) { 'OK' } else { 'Failed' }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><PropertyName>ExitCode</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$metadata = $_.PackageMetadata; if ($null -ne $metadata) { $package = if (-not [string]::IsNullOrWhiteSpace($metadata.PackageSource)) { [System.IO.Path]::GetFileName(([string] $metadata.PackageSource).TrimEnd('\', '/')) }; if ([string]::IsNullOrWhiteSpace($package)) { [string] $metadata.PackageSource } else { $package } }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$metadata = $_.PackageMetadata; if ($null -ne $metadata) { if ($metadata.CleanupPolicy -eq 'Never') { 'Retained' } elseif ($metadata.CleanupSucceeded -eq $true) { 'Removed' } elseif ($metadata.CleanupSucceeded -eq $false) { 'Failed' } }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$metadata = $_.PackageMetadata; if ($null -ne $metadata) { if ($metadata.LogsCopied -eq $true -or @($metadata.CopiedLogPaths).Count -gt 0 -or @($_.CopiedLogPaths).Count -gt 0) { 'Yes' } else { 'No' } } elseif (@($_.CopiedLogPaths).Count -gt 0 -or @($_.Logs).Count -gt 0) { 'Yes' } else { 'No' }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$message = if (-not [string]::IsNullOrWhiteSpace($_.ErrorMessage)) { [string] $_.ErrorMessage } elseif (@($_.Errors).Count -gt 0) { [string] @($_.Errors)[0] } else { $null }; if (-not [string]::IsNullOrWhiteSpace($message)) { $summary = $message -replace '\s+', ' '; if ($summary -match 'server name cannot be resolved') { 'Server name cannot be resolved' } elseif ($summary -match 'client cannot connect to the destination') { 'Client cannot connect to destination' } elseif ($summary -match '(?i)access is denied|access denied') { 'Access denied' } elseif ($summary -match 'WinRM cannot complete the operation') { 'WinRM cannot complete the operation' } elseif ($summary.Length -gt 100) { $summary.Substring(0, 97) + '...' } else { $summary } }</ScriptBlock></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>WinPush.ExecutionResult.CopyFile.Status</Name>
+      <ViewSelectedBy>
+        <TypeName>WinPush.ExecutionResult.CopyFile</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>ComputerName</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Source</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Destination</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ErrorSummary</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>ComputerName</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($_.Succeeded) { 'OK' } else { 'Failed' }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$copy = @($_.Output)[0]; if ($null -ne $copy -and $copy.PSObject.Properties['Source']) { [string] $copy.Source }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$copy = @($_.Output)[0]; if ($null -ne $copy -and $copy.PSObject.Properties['Destination']) { [string] $copy.Destination }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$message = if (-not [string]::IsNullOrWhiteSpace($_.ErrorMessage)) { [string] $_.ErrorMessage } elseif (@($_.Errors).Count -gt 0) { [string] @($_.Errors)[0] } else { $null }; if (-not [string]::IsNullOrWhiteSpace($message)) { $summary = $message -replace '\s+', ' '; if ($summary -match 'server name cannot be resolved') { 'Server name cannot be resolved' } elseif ($summary -match 'client cannot connect to the destination') { 'Client cannot connect to destination' } elseif ($summary -match '(?i)access is denied|access denied') { 'Access denied' } elseif ($summary -match 'WinRM cannot complete the operation') { 'WinRM cannot complete the operation' } elseif ($summary.Length -gt 100) { $summary.Substring(0, 97) + '...' } else { $summary } }</ScriptBlock></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>WinPush.ExecutionResult.GetLogs.Status</Name>
+      <ViewSelectedBy>
+        <TypeName>WinPush.ExecutionResult.GetLogs</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>ComputerName</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label></TableColumnHeader>
+          <TableColumnHeader><Label>LogPath</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Files</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Destination</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ErrorSummary</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>ComputerName</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($_.Succeeded) { 'OK' } else { 'Failed' }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$file = @($_.Output)[0]; $log = @($_.Logs)[0]; if ($null -ne $file -and $file.PSObject.Properties['RemoteDirectory']) { [string] $file.RemoteDirectory } elseif ($null -ne $log -and $log.PSObject.Properties['RemotePath']) { Split-Path -Path ([string] $log.RemotePath) -Parent }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$files = @($_.Output).Count; if ($files -eq 0) { $files = @($_.Logs).Count }; if ($files -eq 0) { $files = @($_.CopiedLogPaths).Count }; $files</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$path = @($_.CopiedLogPaths)[0]; if (-not [string]::IsNullOrWhiteSpace($path)) { Split-Path -Path ([string] $path) -Parent } elseif (-not [string]::IsNullOrWhiteSpace($_.ComputerDirectory)) { $_.ComputerDirectory }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$message = if (-not [string]::IsNullOrWhiteSpace($_.ErrorMessage)) { [string] $_.ErrorMessage } elseif (@($_.Errors).Count -gt 0) { [string] @($_.Errors)[0] } else { $null }; if (-not [string]::IsNullOrWhiteSpace($message)) { $summary = $message -replace '\s+', ' '; if ($summary -match 'server name cannot be resolved') { 'Server name cannot be resolved' } elseif ($summary -match 'client cannot connect to the destination') { 'Client cannot connect to destination' } elseif ($summary -match '(?i)access is denied|access denied') { 'Access denied' } elseif ($summary -match 'WinRM cannot complete the operation') { 'WinRM cannot complete the operation' } elseif ($summary.Length -gt 100) { $summary.Substring(0, 97) + '...' } else { $summary } }</ScriptBlock></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>WinPush.ExecutionResult.TestTarget.Status</Name>
+      <ViewSelectedBy>
+        <TypeName>WinPush.ExecutionResult.TestTarget</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>ComputerName</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Reachable</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Transport</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ErrorSummary</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>ComputerName</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Succeeded</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Transport</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>$message = if (-not [string]::IsNullOrWhiteSpace($_.ErrorMessage)) { [string] $_.ErrorMessage } elseif (@($_.Errors).Count -gt 0) { [string] @($_.Errors)[0] } else { $null }; if (-not [string]::IsNullOrWhiteSpace($message)) { $summary = $message -replace '\s+', ' '; if ($summary -match 'server name cannot be resolved') { 'Server name cannot be resolved' } elseif ($summary -match 'client cannot connect to the destination') { 'Client cannot connect to destination' } elseif ($summary -match '(?i)access is denied|access denied') { 'Access denied' } elseif ($summary -match 'WinRM cannot complete the operation') { 'WinRM cannot complete the operation' } elseif ($summary.Length -gt 100) { $summary.Substring(0, 97) + '...' } else { $summary } }</ScriptBlock></TableColumnItem>
             </TableColumnItems>
           </TableRowEntry>
         </TableRowEntries>

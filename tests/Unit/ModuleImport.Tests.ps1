@@ -20,7 +20,7 @@ function New-TestExecutionResult {
         [object[]] $CopiedLogPaths = @()
     )
 
-    [pscustomobject] [ordered] @{
+    $result = [pscustomobject] [ordered] @{
         PSTypeName        = 'WinPush.ExecutionResult'
         ComputerName      = $ComputerName
         Transport         = 'Psrp'
@@ -39,6 +39,22 @@ function New-TestExecutionResult {
         CopiedLogPaths    = $CopiedLogPaths
         PackageMetadata   = $PackageMetadata
     }
+
+    $operationTypeName = switch ($Operation) {
+        'RunCommand' { 'WinPush.ExecutionResult.RunCommand' }
+        'RunScript' { 'WinPush.ExecutionResult.RunScript' }
+        'RunPackage' { 'WinPush.ExecutionResult.RunPackage' }
+        'CopyFile' { 'WinPush.ExecutionResult.CopyFile' }
+        'GetLogs' { 'WinPush.ExecutionResult.GetLogs' }
+        'TestTarget' { 'WinPush.ExecutionResult.TestTarget' }
+        default { $null }
+    }
+
+    if ($null -ne $operationTypeName) {
+        $result.PSTypeNames.Insert(1, $operationTypeName)
+    }
+
+    $result
 }
 
 Describe 'WinPush module import foundation' {
@@ -76,7 +92,7 @@ Describe 'WinPush module import foundation' {
         }
     }
 
-    It 'formats uncaptured RunCommand execution results as a compact status table' {
+    It 'formats RunCommand execution results as a concise command table' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
 
@@ -86,14 +102,14 @@ Describe 'WinPush module import foundation' {
 
         $formatted | Should Match 'ComputerName'
         $formatted | Should Match 'Status'
-        $formatted | Should Match 'Operation'
         $formatted | Should Match 'ExitCode'
-        $formatted | Should Match 'Details'
-        $formatted | Should Match 'Artifacts'
         $formatted | Should Match 'ErrorSummary'
         $formatted | Should Match 'PC01'
         $formatted | Should Match 'OK'
-        $formatted | Should Match 'RunCommand'
+        $formatted | Should Not Match 'Operation'
+        $formatted | Should Not Match 'Details'
+        $formatted | Should Not Match 'Artifacts'
+        $formatted | Should Not Match 'RunCommand'
         $formatted | Should Not Match 'Succeeded'
         $formatted | Should Not Match 'ErrorMessage'
         $formatted | Should Not Match 'OutputPreview'
@@ -113,7 +129,7 @@ Describe 'WinPush module import foundation' {
         $result.Transport | Should Be 'Psrp'
     }
 
-    It 'formats captured execution results with an artifact indicator but no raw artifact paths' {
+    It 'keeps artifact paths off the default command table while preserving result properties' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
 
@@ -124,8 +140,9 @@ Describe 'WinPush module import foundation' {
         $formatted = $result | Out-String -Width 220
 
         $formatted | Should Match 'ComputerName'
-        $formatted | Should Match 'Artifacts'
-        $formatted | Should Match 'Yes'
+        $formatted | Should Match 'Status'
+        $formatted | Should Match 'ExitCode'
+        $formatted | Should Not Match 'Artifacts'
         $formatted | Should Not Match 'captured remote output'
         $formatted | Should Not Match 'ResultPath'
         $formatted | Should Not Match 'run.log'
@@ -138,6 +155,29 @@ Describe 'WinPush module import foundation' {
         $result.ResultPath | Should Be 'C:\WinPush\20260716-100000\PC01\run.log'
         $null -eq $result.StdOutPath | Should Be $true
         $null -eq $result.StdErrPath | Should Be $true
+    }
+
+    It 'formats RunScript execution results as a concise script table' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $result = New-TestExecutionResult -Operation 'RunScript' -Output @('script output')
+
+        $formatted = $result | Out-String -Width 220
+
+        $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Status'
+        $formatted | Should Match 'ExitCode'
+        $formatted | Should Match 'Script'
+        $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Match 'PC01'
+        $formatted | Should Match 'OK'
+        $formatted | Should Not Match 'Operation'
+        $formatted | Should Not Match 'RunScript'
+        $formatted | Should Not Match 'OutputPreview'
+        $formatted | Should Not Match 'script output'
+
+        $result.Output[0] | Should Be 'script output'
     }
 
     It 'formats long WinRM errors with a concise error summary' {
@@ -163,7 +203,7 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Not Match 'ErrorMessage'
     }
 
-    It 'formats operation-aware details when existing metadata supports them' {
+    It 'formats RunPackage execution results as a package table' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
 
@@ -182,12 +222,68 @@ Describe 'WinPush module import foundation' {
             LogsCopied        = $false
             CopiedLogPaths    = @()
         }
+        $result = New-TestExecutionResult -ComputerName 'PC02' -Operation 'RunPackage' -PackageMetadata $packageMetadata
+
+        $formatted = $result | Out-String -Width 260
+
+        $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Status'
+        $formatted | Should Match 'ExitCode'
+        $formatted | Should Match 'Package'
+        $formatted | Should Match 'Cleanup'
+        $formatted | Should Match 'Logs'
+        $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Match 'PC02'
+        $formatted | Should Match 'Agent.zip'
+        $formatted | Should Match 'Retained'
+        $formatted | Should Match 'No'
+        $formatted | Should Not Match 'Details'
+        $formatted | Should Not Match 'Artifacts'
+        $formatted | Should Not Match 'PackageMetadata'
+        $formatted | Should Not Match 'RemoteStagePath'
+        $formatted | Should Not Match 'CopiedLogPaths'
+        $formatted | Should Not Match 'Transport'
+    }
+
+    It 'formats CopyFile execution results as a copy table' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
         $copyMetadata = [pscustomobject] [ordered] @{
             Direction   = 'Upload'
             Source      = 'C:\Packages\agent.msi'
             Destination = 'C:\Temp\agent.msi'
             FileName    = 'agent.msi'
             Length      = 1024
+        }
+        $result = New-TestExecutionResult -ComputerName 'PC03' -Operation 'CopyFile' -Output @($copyMetadata)
+
+        $formatted = $result | Out-String -Width 260
+
+        $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Status'
+        $formatted | Should Match 'Source'
+        $formatted | Should Match 'Destination'
+        $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Match 'PC03'
+        $formatted | Should Match ([regex]::Escape('C:\Packages\agent.msi'))
+        $formatted | Should Match ([regex]::Escape('C:\Temp\agent.msi'))
+        $formatted | Should Not Match 'Direction'
+        $formatted | Should Not Match 'Length'
+        $formatted | Should Not Match 'Details'
+        $formatted | Should Not Match 'Artifacts'
+        $formatted | Should Not Match 'Transport'
+    }
+
+    It 'formats GetLogs execution results as a log table' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $logMetadata = [pscustomobject] [ordered] @{
+            RemoteDirectory = 'C:\ProgramData\EA\Logs'
+            RemotePath      = 'C:\ProgramData\EA\Logs\install.log'
+            FileName        = 'install.log'
+            Length          = 1024
         }
         $logResult = [pscustomobject] [ordered] @{
             PSTypeName   = 'WinPush.LogResult'
@@ -197,23 +293,52 @@ Describe 'WinPush module import foundation' {
             Copied       = $true
             Error        = $null
         }
-        $results = @(
-            (New-TestExecutionResult -ComputerName 'PC02' -Operation 'RunPackage' -PackageMetadata $packageMetadata),
-            (New-TestExecutionResult -ComputerName 'PC03' -Operation 'CopyFile' -Output @($copyMetadata)),
-            (New-TestExecutionResult -ComputerName 'PC04' -Operation 'GetLogs' -Logs @($logResult) -CopiedLogPaths @('C:\WinPush\run\PC04\Logs\install.log')),
-            (New-TestExecutionResult -ComputerName 'PC05' -Operation 'TestTarget' -ExitCode $null)
-        )
+        $result = New-TestExecutionResult `
+            -ComputerName 'PC04' `
+            -Operation 'GetLogs' `
+            -Output @($logMetadata) `
+            -Logs @($logResult) `
+            -CopiedLogPaths @('C:\WinPush\run\PC04\Logs\install.log') `
+            -ResultPath 'C:\WinPush\run\PC04\run.log'
 
-        $formatted = $results | Out-String -Width 260
+        $formatted = $result | Out-String -Width 260
 
-        $formatted | Should Match ([regex]::Escape('Agent.zip; Cleanup: Retained; Logs: No'))
-        $formatted | Should Match ([regex]::Escape('Upload: agent.msi -> C:\Temp\agent.msi'))
-        $formatted | Should Match '1 log\(s\) copied'
-        $formatted | Should Match 'Session created'
-        $formatted | Should Not Match 'PackageMetadata'
-        $formatted | Should Not Match 'RemoteStagePath'
+        $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Status'
+        $formatted | Should Match 'LogPath'
+        $formatted | Should Match 'Files'
+        $formatted | Should Match 'Destination'
+        $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Match 'PC04'
+        $formatted | Should Match ([regex]::Escape('C:\ProgramData\EA\Logs'))
+        $formatted | Should Match '1'
+        $formatted | Should Match ([regex]::Escape('C:\WinPush\run\PC04\Logs'))
+        $formatted | Should Not Match 'Details'
+        $formatted | Should Not Match 'Artifacts'
         $formatted | Should Not Match 'CopiedLogPaths'
         $formatted | Should Not Match 'Transport'
+    }
+
+    It 'formats TestTarget execution results as a reachability table' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $result = New-TestExecutionResult -ComputerName 'PC05' -Operation 'TestTarget' -ExitCode $null
+
+        $formatted = $result | Out-String -Width 220
+
+        $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Reachable'
+        $formatted | Should Match 'Transport'
+        $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Match 'PC05'
+        $formatted | Should Match 'True'
+        $formatted | Should Match 'Psrp'
+        $formatted | Should Not Match 'Status'
+        $formatted | Should Not Match 'ExitCode'
+        $formatted | Should Not Match 'Operation'
+        $formatted | Should Not Match 'Details'
+        $formatted | Should Not Match 'Artifacts'
     }
 
     It 'keeps transport implementation out of the root module' {

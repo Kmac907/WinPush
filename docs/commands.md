@@ -13,16 +13,44 @@
 
 ## Default Output
 
-All public commands return structured `WinPush.ExecutionResult` objects. The default terminal view is a compact table:
+All public commands return structured `WinPush.ExecutionResult` objects. The default terminal view is operation-specific and compact:
 
 ```text
-ComputerName Status Operation  ExitCode Details Artifacts ErrorSummary
------------- ------ ---------  -------- ------- --------- ------------
-PC01         OK     RunCommand 0
-PC02         Failed RunCommand 1                            Access denied
+Invoke-WinPushCommand
+ComputerName Status ExitCode ErrorSummary
+------------ ------ -------- ------------
+PC01         OK     0
+PC02         Failed 1        Access denied
+
+Invoke-WinPushScript
+ComputerName Status ExitCode Script ErrorSummary
+------------ ------ -------- ------ ------------
+PC01         OK     0
+PC02         Failed 1               Script failed
+
+Invoke-WinPushPackage
+ComputerName Status ExitCode Package    Cleanup  Logs ErrorSummary
+------------ ------ -------- -------    -------  ---- ------------
+PC01         OK     0        Agent.zip  Removed  Yes
+PC02         Failed 1603     Agent.zip  Retained No   Installer failed
+
+Copy-WinPushItem
+ComputerName Status Source          Destination         ErrorSummary
+------------ ------ ------          -----------         ------------
+PC01         OK     C:\Temp\a.txt   C:\Temp\b.txt
+
+Get-WinPushLog
+ComputerName Status LogPath                 Files Destination        ErrorSummary
+------------ ------ -------                 ----- -----------        ------------
+PC01         OK     C:\ProgramData\EA\Logs  4     C:\WinPush\...\Logs
+
+Test-WinPushTarget
+ComputerName Reachable Transport ErrorSummary
+------------ --------- --------- ------------
+PC01         True      Psrp
 ```
 
-`OutputPreview` is not shown. Full output, errors, logs, metadata, and artifact paths remain on the returned object and are visible with property access or `Format-List *`. `-CaptureOutput` writes detailed command, script, or package output to the per-target `run.log`.
+`OutputPreview`, raw output, and artifact paths are not shown by default. Full output, errors, logs, metadata, and artifact paths remain on the returned object and are visible with property access or `Format-List *`. `-CaptureOutput` writes detailed command, script, or package output to the per-target `run.log`.
 
 ## Parameters
 
