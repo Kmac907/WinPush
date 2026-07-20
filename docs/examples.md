@@ -44,6 +44,28 @@ Invoke-WinPushCommand `
     -OutputRoot $OutputRoot
 ```
 
+Run command text through PSRP across resolved targets and capture one shared artifact run:
+
+```powershell
+Invoke-WinPushCommand `
+    -ComputerName @('PC01', 'PC02') `
+    -Command 'hostname' `
+    -CaptureOutput `
+    -OutputRoot $OutputRoot
+
+Get-Content .\hosts.txt |
+    Invoke-WinPushCommand `
+        -Command 'hostname' `
+        -CaptureOutput `
+        -OutputRoot $OutputRoot
+
+Invoke-WinPushCommand `
+    -HostFile .\hosts.txt `
+    -Command 'hostname' `
+    -CaptureOutput `
+    -OutputRoot $OutputRoot
+```
+
 Run command text through WinRS:
 
 ```powershell
@@ -106,6 +128,16 @@ Write-Output "WinPush script ran on $env:COMPUTERNAME"
 
 Invoke-WinPushScript `
     -ComputerName $ComputerName `
+    -ScriptPath $ScriptPath `
+    -CaptureOutput `
+    -OutputRoot $OutputRoot
+```
+
+Run a local script through PSRP across a host file and capture one shared artifact run:
+
+```powershell
+Invoke-WinPushScript `
+    -HostFile .\hosts.txt `
     -ScriptPath $ScriptPath `
     -CaptureOutput `
     -OutputRoot $OutputRoot
@@ -232,6 +264,18 @@ Invoke-WinPushPackage `
     -EntryPoint .\Install-EA.ps1 `
     -CaptureOutput `
     -Logs `
+    -Cleanup OnSuccess `
+    -OutputRoot $OutputRoot
+```
+
+Run the same package through PSRP across a host file:
+
+```powershell
+Invoke-WinPushPackage `
+    -HostFile .\hosts.txt `
+    -Path .\EAInstallPackage `
+    -EntryPoint .\Install-EA.ps1 `
+    -CaptureOutput `
     -Cleanup OnSuccess `
     -OutputRoot $OutputRoot
 ```
