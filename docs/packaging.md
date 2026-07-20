@@ -152,6 +152,8 @@ Invoke-WinPushPackage `
 
 Package `-CaptureOutput` uses the same local artifact shape as command and script execution: one run-level `summary.csv` and one per-target `run.log`. The returned result keeps package output and errors in memory, populates `ResultPath` with `run.log`, and leaves `StdOutPath` and `StdErrPath` blank by default.
 
+Default package console output stays compact. It shows target status, exit code, a package detail summary, whether artifacts were written, and a short error summary. Full package output, errors, cleanup metadata, copied-log paths, and artifact paths remain on the returned object and in `run.log` when captured.
+
 Package `-Logs` uses the package entry point base name to copy immediate regular files from `C:\ProgramData\EA\Logs\<entry-point-name>\` into the local target `Logs` folder. Log copy runs after package entry-point execution using the same PSSession. Log-copy failures are reflected in `Logs`, `CopiedLogPaths`, `PackageMetadata.LogsCopied`, and `PackageMetadata.CopiedLogPaths` without changing the primary package success or failure state.
 
 Package `-Cleanup` controls remote staged-package retention. The default `Never` preserves staged files. `OnSuccess` removes the generated stage directory after successful package execution, and `Always` removes it after success or failure when a remote stage was created. Cleanup runs after optional log collection. Cleanup failures set `PackageMetadata.CleanupSucceeded = False` without changing the primary package output, errors, or log-copy outcome.

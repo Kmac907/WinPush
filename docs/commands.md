@@ -11,6 +11,19 @@
 | `Get-WinPushLog` | Copies immediate regular files from one explicit absolute remote Windows directory to the target's local `Logs` folder under a timestamped output run folder. |
 | `Invoke-WinPushPackage` | Stages a local or cached URI package through PSRP, runs one package-relative `.ps1` entry point, and can capture output, copy logs, and clean remote staging. |
 
+## Default Output
+
+All public commands return structured `WinPush.ExecutionResult` objects. The default terminal view is a compact table:
+
+```text
+ComputerName Status Operation  ExitCode Details Artifacts ErrorSummary
+------------ ------ ---------  -------- ------- --------- ------------
+PC01         OK     RunCommand 0
+PC02         Failed RunCommand 1                            Access denied
+```
+
+`OutputPreview` is not shown. Full output, errors, logs, metadata, and artifact paths remain on the returned object and are visible with property access or `Format-List *`. `-CaptureOutput` writes detailed command, script, or package output to the per-target `run.log`.
+
 ## Parameters
 
 This section lists accepted parameters, whether they take an argument, and the valid argument shape. Switch parameters do not take an argument.

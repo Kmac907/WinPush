@@ -134,12 +134,9 @@ Invoke-WinPushCommand -ComputerName PC01 -Command 'whoami'
 Expected result:
 
 ```text
-ComputerName  : PC01
-Operation     : RunCommand
-Succeeded     : True
-ExitCode      : 0
-OutputPreview : domain\user
-ErrorMessage  :
+ComputerName Status Operation  ExitCode Details Artifacts ErrorSummary
+------------ ------ ---------  -------- ------- --------- ------------
+PC01         OK     RunCommand 0
 ```
 
 ## Command Summary
@@ -247,7 +244,7 @@ WinPush public commands return structured PowerShell objects with `PSTypeName = 
 | `StdOutPath` | `string` | Reserved for optional separate stdout diagnostics; blank for the default artifact contract. |
 | `StdErrPath` | `string` | Reserved for optional separate stderr diagnostics; blank for the default artifact contract. |
 
-Default formatting displays `OutputPreview`, which is the last item in `Output`. When `-CaptureOutput` writes output files, default formatting also displays `ResultPath`.
+Default formatting displays a compact per-target table with status, operation, exit code, operation-aware details, an artifact indicator, and a short error summary. It does not print raw command or script output. Full output, errors, logs, package metadata, and artifact paths remain available on the returned object with property access or `Format-List *`. When `-CaptureOutput` is used, detailed output and errors are also written to each target's `run.log`.
 
 Generated files, logs, reports, or receipts:
 

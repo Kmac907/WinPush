@@ -1,6 +1,46 @@
 $script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..')
 $script:ManifestPath = Join-Path -Path $script:ModuleRoot -ChildPath 'WinPush.psd1'
 
+function New-TestExecutionResult {
+    param(
+        [string] $ComputerName = 'PC01',
+        [string] $Operation = 'RunCommand',
+        [bool] $Succeeded = $true,
+        [AllowNull()]
+        [Nullable[int]] $ExitCode = 0,
+        [AllowNull()]
+        [string] $ErrorMessage = $null,
+        [object[]] $Output = @(),
+        [object[]] $Errors = @(),
+        [object[]] $Logs = @(),
+        [AllowNull()]
+        [string] $ResultPath = $null,
+        [AllowNull()]
+        [object] $PackageMetadata = $null,
+        [object[]] $CopiedLogPaths = @()
+    )
+
+    [pscustomobject] [ordered] @{
+        PSTypeName        = 'WinPush.ExecutionResult'
+        ComputerName      = $ComputerName
+        Transport         = 'Psrp'
+        Operation         = $Operation
+        Succeeded         = $Succeeded
+        ExitCode          = $ExitCode
+        ErrorMessage      = $ErrorMessage
+        Output            = $Output
+        Errors            = $Errors
+        Logs              = $Logs
+        RunDirectory      = if ($ResultPath) { 'C:\WinPush\20260716-100000' } else { $null }
+        ComputerDirectory = if ($ResultPath) { 'C:\WinPush\20260716-100000\PC01' } else { $null }
+        ResultPath        = $ResultPath
+        StdOutPath        = $null
+        StdErrPath        = $null
+        CopiedLogPaths    = $CopiedLogPaths
+        PackageMetadata   = $PackageMetadata
+    }
+}
+
 Describe 'WinPush module import foundation' {
     It 'uses an explicit manifest export list' {
         $manifest = Import-PowerShellDataFile -LiteralPath $script:ManifestPath
@@ -36,118 +76,144 @@ Describe 'WinPush module import foundation' {
         }
     }
 
-    It 'formats uncaptured execution results as a readable status list with output preview' {
+    It 'formats uncaptured RunCommand execution results as a compact status table' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
 
-        $result = [pscustomobject] [ordered] @{
-            PSTypeName        = 'WinPush.ExecutionResult'
-            ComputerName      = 'PC01'
-            Transport         = 'Psrp'
-            Operation         = 'RunCommand'
-            Succeeded         = $true
-            ExitCode          = 0
-            ErrorMessage      = $null
-            Output            = @('first remote output', 'last remote output')
-            Errors            = @()
-            Logs              = @()
-            RunDirectory      = $null
-            ComputerDirectory = $null
-            ResultPath        = $null
-            StdOutPath        = $null
-            StdErrPath        = $null
-            CopiedLogPaths    = @()
-        }
+        $result = New-TestExecutionResult -Output @('first remote output', 'last remote output')
 
-        $formatted = $result | Out-String
+        $formatted = $result | Out-String -Width 220
 
         $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Status'
         $formatted | Should Match 'Operation'
-        $formatted | Should Match 'Succeeded'
         $formatted | Should Match 'ExitCode'
-        $formatted | Should Match 'ErrorMessage'
-        $formatted | Should Match 'OutputPreview'
+        $formatted | Should Match 'Details'
+        $formatted | Should Match 'Artifacts'
+        $formatted | Should Match 'ErrorSummary'
         $formatted | Should Match 'PC01'
+        $formatted | Should Match 'OK'
         $formatted | Should Match 'RunCommand'
-        $formatted | Should Match 'last remote output'
+        $formatted | Should Not Match 'Succeeded'
+        $formatted | Should Not Match 'ErrorMessage'
+        $formatted | Should Not Match 'OutputPreview'
         $formatted | Should Not Match 'first remote output'
+        $formatted | Should Not Match 'last remote output'
         $formatted | Should Not Match 'Transport'
+        $formatted | Should Not Match '^Output\s+:'
+        $formatted | Should Not Match '^Errors\s+:'
+        $formatted | Should Not Match '^Logs\s+:'
+        $formatted | Should Not Match 'RunDirectory'
+        $formatted | Should Not Match 'ComputerDirectory'
+        $formatted | Should Not Match 'ResultPath'
         $formatted | Should Not Match 'StdOutPath'
         $formatted | Should Not Match 'StdErrPath'
-        $formatted | Should Not Match '^Output\s+:'
+
+        ($result.Output -join ',') | Should Be 'first remote output,last remote output'
+        $result.Transport | Should Be 'Psrp'
     }
 
-    It 'formats captured execution results with output preview and artifact paths' {
+    It 'formats captured execution results with an artifact indicator but no raw artifact paths' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
 
-        $result = [pscustomobject] [ordered] @{
-            PSTypeName        = 'WinPush.ExecutionResult'
-            ComputerName      = 'PC01'
-            Transport         = 'Psrp'
-            Operation         = 'RunCommand'
-            Succeeded         = $true
-            ExitCode          = 0
-            ErrorMessage      = $null
-            Output            = @('captured remote output')
-            Errors            = @()
-            Logs              = @()
-            RunDirectory      = 'C:\WinPush\20260716-100000'
-            ComputerDirectory = 'C:\WinPush\20260716-100000\PC01'
-            ResultPath        = 'C:\WinPush\20260716-100000\PC01\run.log'
-            StdOutPath        = $null
-            StdErrPath        = $null
-            CopiedLogPaths    = @()
-        }
+        $result = New-TestExecutionResult `
+            -Output @('captured remote output') `
+            -ResultPath 'C:\WinPush\20260716-100000\PC01\run.log'
 
-        $formatted = $result | Out-String
+        $formatted = $result | Out-String -Width 220
 
         $formatted | Should Match 'ComputerName'
-        $formatted | Should Match 'Operation'
-        $formatted | Should Match 'Succeeded'
-        $formatted | Should Match 'ExitCode'
-        $formatted | Should Match 'OutputPreview'
-        $formatted | Should Match 'captured remote output'
-        $formatted | Should Match 'ErrorMessage'
-        $formatted | Should Match 'ResultPath'
-        $formatted | Should Match 'run.log'
+        $formatted | Should Match 'Artifacts'
+        $formatted | Should Match 'Yes'
+        $formatted | Should Not Match 'captured remote output'
+        $formatted | Should Not Match 'ResultPath'
+        $formatted | Should Not Match 'run.log'
+        $formatted | Should Not Match 'RunDirectory'
+        $formatted | Should Not Match 'ComputerDirectory'
         $formatted | Should Not Match 'StdOutPath'
         $formatted | Should Not Match 'StdErrPath'
         $formatted | Should Not Match 'Transport'
-        $formatted | Should Not Match 'ComputerDirectory'
+
+        $result.ResultPath | Should Be 'C:\WinPush\20260716-100000\PC01\run.log'
+        $null -eq $result.StdOutPath | Should Be $true
+        $null -eq $result.StdErrPath | Should Be $true
     }
 
-    It 'does not truncate long execution error messages in the default view' {
+    It 'formats long WinRM errors with a concise error summary' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
 
         $errorMessage = 'Connecting to remote server JK148H4 failed with the following error message: WinRM cannot complete the operation. Verify that the specified computer name is valid, that the computer is accessible over the network, and that a firewall exception for the WinRM service is enabled.'
-        $result = [pscustomobject] [ordered] @{
-            PSTypeName        = 'WinPush.ExecutionResult'
-            ComputerName      = 'JK148H4'
-            Transport         = 'Psrp'
-            Operation         = 'RunCommand'
-            Succeeded         = $false
-            ExitCode          = 1
-            ErrorMessage      = $errorMessage
-            Output            = @()
-            Errors            = @($errorMessage)
-            Logs              = @()
-            RunDirectory      = $null
-            ComputerDirectory = $null
-            ResultPath        = $null
-            StdOutPath        = $null
-            StdErrPath        = $null
-            CopiedLogPaths    = @()
-        }
+        $result = New-TestExecutionResult `
+            -ComputerName 'JK148H4' `
+            -Succeeded $false `
+            -ExitCode 1 `
+            -ErrorMessage $errorMessage `
+            -Errors @($errorMessage)
 
-        $formatted = $result | Out-String -Width 72
+        $formatted = $result | Out-String -Width 220
         $normalized = $formatted -replace '\s+', ' '
 
-        $formatted | Should Match 'ErrorMessage'
-        $normalized | Should Match 'Connecting to remote server JK148H4 failed'
-        $normalized | Should Match 'firewall exception for the WinRM service is enabled'
-        $formatted | Should Not Match ([regex]::Escape([string] [char] 0x2026))
+        $formatted | Should Match 'ErrorSummary'
+        $formatted | Should Match 'Failed'
+        $formatted | Should Match 'WinRM cannot complete the operation'
+        $normalized | Should Not Match 'Connecting to remote server JK148H4 failed'
+        $normalized | Should Not Match 'firewall exception for the WinRM service is enabled'
+        $formatted | Should Not Match 'ErrorMessage'
+    }
+
+    It 'formats operation-aware details when existing metadata supports them' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $packageMetadata = [pscustomobject] [ordered] @{
+            PSTypeName        = 'WinPush.PackageMetadata'
+            PackageSourceType = 'Path'
+            PackageSource     = 'C:\Packages\Agent.zip'
+            LocalPackagePath  = 'C:\Packages\Agent.zip'
+            RemoteStagePath   = 'C:\ProgramData\WinPush\Staging\run\Agent.zip'
+            EntryPoint        = 'install.ps1'
+            Extracted         = $true
+            ExecutionStarted  = $null
+            ExecutionEnded    = $null
+            CleanupPolicy     = 'Never'
+            CleanupSucceeded  = $null
+            LogsCopied        = $false
+            CopiedLogPaths    = @()
+        }
+        $copyMetadata = [pscustomobject] [ordered] @{
+            Direction   = 'Upload'
+            Source      = 'C:\Packages\agent.msi'
+            Destination = 'C:\Temp\agent.msi'
+            FileName    = 'agent.msi'
+            Length      = 1024
+        }
+        $logResult = [pscustomobject] [ordered] @{
+            PSTypeName   = 'WinPush.LogResult'
+            ComputerName = 'PC03'
+            RemotePath   = 'C:\ProgramData\EA\Logs'
+            LocalPath    = 'C:\WinPush\run\PC03\Logs\install.log'
+            Copied       = $true
+            Error        = $null
+        }
+        $results = @(
+            (New-TestExecutionResult -ComputerName 'PC02' -Operation 'RunPackage' -PackageMetadata $packageMetadata),
+            (New-TestExecutionResult -ComputerName 'PC03' -Operation 'CopyFile' -Output @($copyMetadata)),
+            (New-TestExecutionResult -ComputerName 'PC04' -Operation 'GetLogs' -Logs @($logResult) -CopiedLogPaths @('C:\WinPush\run\PC04\Logs\install.log')),
+            (New-TestExecutionResult -ComputerName 'PC05' -Operation 'TestTarget' -ExitCode $null)
+        )
+
+        $formatted = $results | Out-String -Width 260
+
+        $formatted | Should Match ([regex]::Escape('Agent.zip; Cleanup: Retained; Logs: No'))
+        $formatted | Should Match ([regex]::Escape('Upload: agent.msi -> C:\Temp\agent.msi'))
+        $formatted | Should Match '1 log\(s\) copied'
+        $formatted | Should Match 'Session created'
+        $formatted | Should Not Match 'PackageMetadata'
+        $formatted | Should Not Match 'RemoteStagePath'
+        $formatted | Should Not Match 'CopiedLogPaths'
+        $formatted | Should Not Match 'Transport'
     }
 
     It 'keeps transport implementation out of the root module' {

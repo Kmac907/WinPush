@@ -11,6 +11,8 @@ $ComputerName = 'PC01'
 $OutputRoot = 'C:\WinPush'
 ```
 
+WinPush commands return structured objects. The default terminal view is a compact status table; full command, script, and package output stays on the result object and in per-target `run.log` files when `-CaptureOutput` is used.
+
 ## Authentication
 
 Use the current Windows identity:
