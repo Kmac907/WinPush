@@ -25,8 +25,8 @@ PC02         Failed 1        Access denied
 Invoke-WinPushScript
 ComputerName Status ExitCode Script ErrorSummary
 ------------ ------ -------- ------ ------------
-PC01         OK     0
-PC02         Failed 1               Script failed
+PC01         OK     0        inventory.ps1
+PC02         Failed 1        inventory.ps1 Script failed
 
 Invoke-WinPushPackage
 ComputerName Status ExitCode Package    Cleanup  Logs ErrorSummary

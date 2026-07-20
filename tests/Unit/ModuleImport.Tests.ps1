@@ -17,7 +17,9 @@ function New-TestExecutionResult {
         [string] $ResultPath = $null,
         [AllowNull()]
         [object] $PackageMetadata = $null,
-        [object[]] $CopiedLogPaths = @()
+        [object[]] $CopiedLogPaths = @(),
+        [AllowNull()]
+        [string] $Script = $null
     )
 
     $result = [pscustomobject] [ordered] @{
@@ -38,6 +40,7 @@ function New-TestExecutionResult {
         StdErrPath        = $null
         CopiedLogPaths    = $CopiedLogPaths
         PackageMetadata   = $PackageMetadata
+        Script            = $Script
     }
 
     $operationTypeName = switch ($Operation) {
@@ -161,7 +164,7 @@ Describe 'WinPush module import foundation' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module $script:ManifestPath -Force
 
-        $result = New-TestExecutionResult -Operation 'RunScript' -Output @('script output')
+        $result = New-TestExecutionResult -Operation 'RunScript' -Output @('script output') -Script 'Inventory.ps1'
 
         $formatted = $result | Out-String -Width 220
 
@@ -172,6 +175,7 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Match 'ErrorSummary'
         $formatted | Should Match 'PC01'
         $formatted | Should Match 'OK'
+        $formatted | Should Match 'Inventory.ps1'
         $formatted | Should Not Match 'Operation'
         $formatted | Should Not Match 'RunScript'
         $formatted | Should Not Match 'OutputPreview'

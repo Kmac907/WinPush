@@ -11,7 +11,7 @@ Describe 'New-WinPushExecutionResult' {
         $propertyNames = @($result.PSObject.Properties.Name)
 
         $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
-        ($propertyNames -join ',') | Should Be 'ComputerName,Transport,Operation,Succeeded,ExitCode,ErrorMessage,Output,Errors,Logs,RunDirectory,ComputerDirectory,ResultPath,StdOutPath,StdErrPath,CopiedLogPaths,PackageMetadata'
+        ($propertyNames -join ',') | Should Be 'ComputerName,Transport,Operation,Succeeded,ExitCode,ErrorMessage,Output,Errors,Logs,RunDirectory,ComputerDirectory,ResultPath,StdOutPath,StdErrPath,CopiedLogPaths,PackageMetadata,Script'
         ($propertyNames -contains 'Credential') | Should Be $false
         ($propertyNames -contains 'Password') | Should Be $false
     }
@@ -126,6 +126,14 @@ Describe 'New-WinPushExecutionResult' {
         $null -eq $result.StdOutPath | Should Be $true
         $null -eq $result.StdErrPath | Should Be $true
         $null -eq $result.PackageMetadata | Should Be $true
+        $null -eq $result.Script | Should Be $true
+    }
+
+    It 'captures optional script identity without mixing it into output' {
+        $result = New-WinPushExecutionResult -ComputerName 'PC-009' -Transport 'PSRP' -Operation 'RunScript' -Succeeded $true -ExitCode 0 -Output 'script output' -Script 'inventory.ps1'
+
+        $result.Script | Should Be 'inventory.ps1'
+        ($result.Output -join ',') | Should Be 'script output'
     }
 
     It 'captures local artifact paths when supplied' {

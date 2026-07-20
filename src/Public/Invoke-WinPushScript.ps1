@@ -51,6 +51,7 @@ function Invoke-WinPushScript {
         }
 
         $resolvedScriptPath = $scriptItem.FullName
+        $scriptDisplayName = $scriptItem.Name
         $remoteLogDirectory = if ($Logs) { Get-WinPushScriptLogDirectory -ScriptPath $resolvedScriptPath } else { $null }
         $computerNames = [System.Collections.Generic.List[string]]::new()
     }
@@ -209,7 +210,8 @@ function Invoke-WinPushScript {
                     -ComputerDirectory $computerDirectory `
                     -ResultPath $resultPath `
                     -StdOutPath $stdOutPath `
-                    -StdErrPath $stdErrPath
+                    -StdErrPath $stdErrPath `
+                    -Script $scriptDisplayName
 
                 continue
             }
@@ -295,7 +297,8 @@ function Invoke-WinPushScript {
                     -StdOutPath $stdOutPath `
                     -StdErrPath $stdErrPath `
                     -Logs $logResults `
-                    -CopiedLogPaths $copiedLogPaths
+                    -CopiedLogPaths $copiedLogPaths `
+                    -Script $scriptDisplayName
             }
             catch {
                 $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $null -eq $session) {
@@ -375,7 +378,8 @@ function Invoke-WinPushScript {
                     -StdOutPath $stdOutPath `
                     -StdErrPath $stdErrPath `
                     -Logs $logResults `
-                    -CopiedLogPaths $copiedLogPaths
+                    -CopiedLogPaths $copiedLogPaths `
+                    -Script $scriptDisplayName
             }
             finally {
                 if ($null -ne $session) {

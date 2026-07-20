@@ -48,7 +48,10 @@ function New-WinPushExecutionResult {
         [object[]] $CopiedLogPaths = @(),
 
         [AllowNull()]
-        [object] $PackageMetadata = $null
+        [object] $PackageMetadata = $null,
+
+        [AllowNull()]
+        [string] $Script = $null
     )
 
     [object[]] $normalizedOutput = @()
@@ -80,6 +83,7 @@ function New-WinPushExecutionResult {
     $normalizedResultPath = if ([string]::IsNullOrWhiteSpace($ResultPath)) { $null } else { $ResultPath }
     $normalizedStdOutPath = if ([string]::IsNullOrWhiteSpace($StdOutPath)) { $null } else { $StdOutPath }
     $normalizedStdErrPath = if ([string]::IsNullOrWhiteSpace($StdErrPath)) { $null } else { $StdErrPath }
+    $normalizedScript = if ([string]::IsNullOrWhiteSpace($Script)) { $null } else { $Script }
 
     $result = [pscustomobject] [ordered] @{
         PSTypeName        = 'WinPush.ExecutionResult'
@@ -99,6 +103,7 @@ function New-WinPushExecutionResult {
         StdErrPath        = $normalizedStdErrPath
         CopiedLogPaths    = $normalizedCopiedLogPaths
         PackageMetadata   = $PackageMetadata
+        Script            = $normalizedScript
     }
 
     $operationTypeName = switch ($Operation) {

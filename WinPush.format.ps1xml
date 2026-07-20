@@ -44,7 +44,7 @@
               <TableColumnItem><PropertyName>ComputerName</PropertyName></TableColumnItem>
               <TableColumnItem><ScriptBlock>if ($_.Succeeded) { 'OK' } else { 'Failed' }</ScriptBlock></TableColumnItem>
               <TableColumnItem><PropertyName>ExitCode</PropertyName></TableColumnItem>
-              <TableColumnItem><ScriptBlock>$metadata = @($_.Output)[0]; if ($null -ne $metadata) { if ($metadata.PSObject.Properties['Script']) { [string] $metadata.Script } elseif ($metadata.PSObject.Properties['ScriptPath']) { [System.IO.Path]::GetFileName(([string] $metadata.ScriptPath).TrimEnd('\', '/')) } }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><PropertyName>Script</PropertyName></TableColumnItem>
               <TableColumnItem><ScriptBlock>$message = if (-not [string]::IsNullOrWhiteSpace($_.ErrorMessage)) { [string] $_.ErrorMessage } elseif (@($_.Errors).Count -gt 0) { [string] @($_.Errors)[0] } else { $null }; if (-not [string]::IsNullOrWhiteSpace($message)) { $summary = $message -replace '\s+', ' '; if ($summary -match 'server name cannot be resolved') { 'Server name cannot be resolved' } elseif ($summary -match 'client cannot connect to the destination') { 'Client cannot connect to destination' } elseif ($summary -match '(?i)access is denied|access denied') { 'Access denied' } elseif ($summary -match 'WinRM cannot complete the operation') { 'WinRM cannot complete the operation' } elseif ($summary.Length -gt 100) { $summary.Substring(0, 97) + '...' } else { $summary } }</ScriptBlock></TableColumnItem>
             </TableColumnItems>
           </TableRowEntry>

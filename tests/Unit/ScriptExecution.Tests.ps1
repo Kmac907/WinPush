@@ -345,6 +345,7 @@ Describe 'Invoke-WinPushScript' {
         $result.ComputerName | Should Be 'PC-001'
         $result.Transport | Should Be 'Psrp'
         $result.Operation | Should Be 'RunScript'
+        $result.Script | Should Be 'Invoke-WinPushScript-Fixture.ps1'
         $result.Succeeded | Should Be $true
         $result.ExitCode | Should Be 0
         [string]::IsNullOrEmpty($result.ErrorMessage) | Should Be $true
@@ -1177,6 +1178,7 @@ Describe 'Invoke-WinPushScript' {
         $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM -KeepStagedScript
 
         $result.Succeeded | Should Be $true
+        $result.Script | Should Be 'Invoke-WinPushScript-Fixture.ps1'
         @($script:NativeStageCopyPlans).Count | Should Be 1
         @($script:NativeProcessFilePaths).Count | Should Be 1
         @($script:NativeStageCleanupPlans).Count | Should Be 0
@@ -1190,6 +1192,7 @@ Describe 'Invoke-WinPushScript' {
         $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM
 
         $result.Succeeded | Should Be $false
+        $result.Script | Should Be 'Invoke-WinPushScript-Fixture.ps1'
         $result.ExitCode | Should Be 1
         $result.ErrorMessage | Should Be 'stage copy failed'
         $result.Errors[0] | Should Be 'stage copy failed'
@@ -1314,6 +1317,7 @@ Describe 'Invoke-WinPushScript' {
 
         $result.ComputerName | Should Be 'PC-001'
         $result.Operation | Should Be 'RunScript'
+        $result.Script | Should Be 'Invoke-WinPushScript-Fixture.ps1'
         $result.Succeeded | Should Be $false
         $result.ExitCode | Should Be 1
         $result.ErrorMessage | Should Be 'connection failed'
