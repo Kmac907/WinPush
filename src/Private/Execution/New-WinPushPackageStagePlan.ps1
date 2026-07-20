@@ -374,6 +374,7 @@ function Remove-WinPushPsrpPackageStage {
                 throw [System.InvalidOperationException]::new('Package cleanup path must stay under RemoteStageRoot.')
             }
 
+            Set-Location -LiteralPath ([System.IO.Path]::GetTempPath()) -ErrorAction Stop
             Remove-Item -LiteralPath $canonicalCleanupDirectory -Recurse -Force -ErrorAction Stop
         } `
         -ArgumentList $canonicalRemoteDirectory, $canonicalStageRoot `

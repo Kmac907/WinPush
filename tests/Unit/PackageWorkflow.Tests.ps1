@@ -1840,6 +1840,7 @@ Describe 'WinPush package entry point helpers' {
         @($script:InvokeCommandArgumentLists).Count | Should Be 1
         $script:InvokeCommandArgumentLists[0][0] | Should Be $stagePlan.RemoteDirectory
         $script:InvokeCommandArgumentLists[0][1] | Should Be 'C:\ProgramData\WinPush\Staging\'
+        $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape('Set-Location -LiteralPath ([System.IO.Path]::GetTempPath()) -ErrorAction Stop'))
         $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape('Remove-Item -LiteralPath $canonicalCleanupDirectory -Recurse -Force -ErrorAction Stop'))
     }
 
