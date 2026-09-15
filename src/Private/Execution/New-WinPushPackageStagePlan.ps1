@@ -1,3 +1,16 @@
+function Test-WinPushPackageAbsoluteWindowsPath {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [string] $Path
+    )
+
+    -not [string]::IsNullOrWhiteSpace($Path) -and
+        -not $Path.Contains('/') -and
+        $Path -notmatch '^\\\\[.?]\\' -and
+        ($Path -match '^[A-Za-z]:\\' -or $Path -match '^\\\\[^\\]+\\[^\\]+(?:\\|$)')
+}
+
 function New-WinPushPackageStagePlan {
     [CmdletBinding()]
     param(
@@ -10,8 +23,8 @@ function New-WinPushPackageStagePlan {
         [switch] $Directory
     )
 
-    if ([string]::IsNullOrWhiteSpace($RemoteStageRoot)) {
-        throw [System.ArgumentException]::new('RemoteStageRoot must not be empty.')
+    if (-not (Test-WinPushPackageAbsoluteWindowsPath -Path $RemoteStageRoot)) {
+        throw [System.ArgumentException]::new('RemoteStageRoot must be an absolute drive-rooted or UNC Windows path.')
     }
 
     $fileName = Split-Path -Path $PackagePath -Leaf
@@ -43,6 +56,10 @@ function New-WinPushPackageCachePlan {
 
     if (-not $Uri.IsAbsoluteUri) {
         throw [System.ArgumentException]::new('Uri must be an absolute package URI.')
+    }
+
+    if ($Uri.Scheme -ne [System.Uri]::UriSchemeHttps) {
+        throw [System.ArgumentException]::new('Uri must use HTTPS.')
     }
 
     if ([string]::IsNullOrWhiteSpace($PackageCacheRoot)) {
@@ -228,7 +245,9 @@ function Invoke-WinPushPsrpPackageEntryPoint {
         [string] $PackageRoot,
 
         [Parameter(Mandatory)]
-        [string] $EntryPoint
+        [string] $EntryPoint,
+
+        [object[]] $ArgumentList = @()
     )
 
     $entryPointPlan = Resolve-WinPushPackageEntryPoint -PackageRoot $PackageRoot -EntryPoint $EntryPoint
@@ -238,7 +257,9 @@ function Invoke-WinPushPsrpPackageEntryPoint {
             [string] $WorkingDirectory,
 
             [Parameter(Mandatory)]
-            [string] $EntryPointRelativePath
+            [string] $EntryPointRelativePath,
+
+            [object[]] $EntryPointArgumentList = @()
         )
 
         try {
@@ -252,7 +273,7 @@ function Invoke-WinPushPsrpPackageEntryPoint {
                 throw [System.IO.FileNotFoundException]::new("Package entry point was not found: $entryPointPath")
             }
 
-            & $entryPointPath 2>&1 | ForEach-Object {
+            & $entryPointPath @EntryPointArgumentList 2>&1 | ForEach-Object {
                 if ($_ -is [System.Management.Automation.ErrorRecord]) {
                     [pscustomobject] [ordered] @{
                         Stream = 'Error'
@@ -275,10 +296,12 @@ function Invoke-WinPushPsrpPackageEntryPoint {
         }
     }
 
+    [object[]] $invokeArguments = $entryPointPlan.PackageRoot, $entryPointPlan.RelativePath, $null
+    $invokeArguments[2] = $ArgumentList
     $streamItems = @(Invoke-Command `
             -Session $Session `
             -ScriptBlock $remoteScriptBlock `
-            -ArgumentList $entryPointPlan.PackageRoot, $entryPointPlan.RelativePath `
+            -ArgumentList $invokeArguments `
             -ErrorAction Stop)
 
     $output = foreach ($item in $streamItems) {
@@ -344,8 +367,8 @@ function Remove-WinPushPsrpPackageStage {
         [string] $RemoteStageRoot
     )
 
-    if ([string]::IsNullOrWhiteSpace($RemoteStageRoot)) {
-        throw [System.ArgumentException]::new('RemoteStageRoot must not be empty.')
+    if (-not (Test-WinPushPackageAbsoluteWindowsPath -Path $RemoteStageRoot)) {
+        throw [System.ArgumentException]::new('RemoteStageRoot must be an absolute drive-rooted or UNC Windows path.')
     }
 
     $remoteDirectory = [string] $StagePlan.RemoteDirectory

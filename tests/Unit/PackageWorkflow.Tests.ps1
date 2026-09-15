@@ -51,7 +51,7 @@ Describe 'Invoke-WinPushPackage contract' {
         ($parameterSetNames -join ',') | Should Be 'PathComputerName,PathHostFile,UriComputerName,UriHostFile'
     }
 
-    It 'exposes only the planned package workflow parameters for item 11.1' {
+    It 'exposes the package workflow parameters' {
         $command = Get-Command Invoke-WinPushPackage
         $parameterNames = @($command.Parameters.Keys | Sort-Object)
 
@@ -68,6 +68,8 @@ Describe 'Invoke-WinPushPackage contract' {
             'PackageCacheRoot',
             'Path',
             'RemoteStageRoot',
+            'ArgumentList',
+            'ExpectedSha256',
             'Uri'
         )) {
             ($parameterNames -contains $expectedParameter) | Should Be $true
@@ -75,7 +77,6 @@ Describe 'Invoke-WinPushPackage contract' {
 
         ($parameterNames -contains 'PackageManifest') | Should Be $false
         ($parameterNames -contains 'Hash') | Should Be $false
-        ($parameterNames -contains 'ArgumentList') | Should Be $false
         ($parameterNames -contains 'Transport') | Should Be $false
     }
 
@@ -119,6 +120,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:PackageExecutionSessions = @()
         $script:PackageExecutionRoots = @()
         $script:PackageExecutionEntryPoints = @()
+        $script:PackageExecutionArgumentLists = @()
         $script:PackageExecutionOutput = @('package output')
         $script:PackageExecutionErrors = @()
         $script:PackageExecutionError = $null
@@ -218,12 +220,14 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         param(
             $Session,
             [string] $PackageRoot,
-            [string] $EntryPoint
+            [string] $EntryPoint,
+            [object[]] $ArgumentList
         )
 
         $script:PackageExecutionSessions += $Session
         $script:PackageExecutionRoots += $PackageRoot
         $script:PackageExecutionEntryPoints += $EntryPoint
+        $script:PackageExecutionArgumentLists += , $ArgumentList
         $script:PackageOperationOrder += 'Package'
         if ($null -ne $script:PackageExecutionError) {
             throw $script:PackageExecutionError
@@ -1356,6 +1360,128 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
     }
 
+    It 'passes entry point arguments as positional objects without parsing strings' {
+        $arguments = @('--name', 'value with spaces', '$(throw "must not run")', 42)
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -ArgumentList $arguments
+
+        $result.Succeeded | Should Be $true
+        @($script:PackageExecutionArgumentLists).Count | Should Be 1
+        @($script:PackageExecutionArgumentLists[0]).Count | Should Be 4
+        $script:PackageExecutionArgumentLists[0][0] | Should Be '--name'
+        $script:PackageExecutionArgumentLists[0][1] | Should Be 'value with spaces'
+        $script:PackageExecutionArgumentLists[0][2] | Should Be '$(throw "must not run")'
+        $script:PackageExecutionArgumentLists[0][3] | Should Be 42
+    }
+
+    It 'rejects non-absolute Windows remote stage roots before download or session creation' {
+        foreach ($invalidRoot in @('relative\stage', '\rooted-only', 'C:drive-relative', '/unix/root', '\\.\pipe\stage', '\\?\C:\stage')) {
+            {
+                Invoke-WinPushPackage `
+                    -ComputerName 'PC-001' `
+                    -Uri 'https://storage.contoso.example/packages/EA.zip' `
+                    -EntryPoint '.\Install-EA.ps1' `
+                    -RemoteStageRoot $invalidRoot
+            } | Should Throw 'RemoteStageRoot must be an absolute drive-rooted or UNC Windows path.'
+        }
+
+        @($script:DownloadUris).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'accepts drive-rooted and UNC remote stage roots' {
+        $driveResult = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -RemoteStageRoot 'D:\WinPushStage'
+        $uncResult = Invoke-WinPushPackage `
+            -ComputerName 'PC-002' `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1' `
+            -RemoteStageRoot '\\server\share\WinPushStage'
+
+        $driveResult.Succeeded | Should Be $true
+        $uncResult.Succeeded | Should Be $true
+        $script:RemoteDirectoriesCreated[0] | Should Match '^D:\\WinPushStage\\package-'
+        $script:RemoteDirectoriesCreated[1] | Should Match '^\\\\server\\share\\WinPushStage\\package-'
+    }
+
+    It 'rejects non-HTTPS URI package sources before download or session creation' {
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'http://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1'
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'Uri must use HTTPS.'
+        @($script:DownloadUris).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'rejects invalid ExpectedSha256 values before download' {
+        $formatError = $null
+        try {
+            Invoke-WinPushPackage `
+                -ComputerName 'PC-001' `
+                -Uri 'https://storage.contoso.example/packages/EA.zip' `
+                -EntryPoint '.\Install-EA.ps1' `
+                -ExpectedSha256 'not-a-sha256' `
+                -ErrorAction Stop
+        }
+        catch {
+            $formatError = $_
+        }
+
+        $formatError.Exception.Message | Should Match 'does not match the.*pattern'
+        @($script:DownloadUris).Count | Should Be 0
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+    }
+
+    It 'validates a matching SHA256 before opening the endpoint session' {
+        $expectedFile = Join-Path -Path $TestDrive -ChildPath 'expected-download.bin'
+        Set-Content -LiteralPath $expectedFile -Value 'downloaded package' -Encoding utf8NoBOM
+        $expectedSha256 = (Get-FileHash -LiteralPath $expectedFile -Algorithm SHA256).Hash
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -ExpectedSha256 $expectedSha256
+
+        $result.Succeeded | Should Be $true
+        @($script:DownloadUris).Count | Should Be 1
+        @($script:NewPSSessionComputerNames).Count | Should Be 1
+    }
+
+    It 'rejects a SHA256 mismatch and removes the cache before opening the endpoint session' {
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -ExpectedSha256 ('0' * 64)
+
+        $result.Succeeded | Should Be $false
+        $result.ErrorMessage | Should Be 'Downloaded package SHA256 does not match ExpectedSha256.'
+        @($script:DownloadUris).Count | Should Be 1
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        Test-Path -LiteralPath (Split-Path -Path $script:DownloadOutFiles[0] -Parent) | Should Be $false
+    }
+
+    It 'uses a unique disposable cache directory for every URI invocation' {
+        Invoke-WinPushPackage -ComputerName 'PC-001' -Uri 'https://storage.contoso.example/packages/EA.zip' -EntryPoint '.\Install-EA.ps1' | Out-Null
+        Invoke-WinPushPackage -ComputerName 'PC-002' -Uri 'https://storage.contoso.example/packages/EA.zip' -EntryPoint '.\Install-EA.ps1' | Out-Null
+
+        @($script:DownloadOutFiles).Count | Should Be 2
+        (Split-Path -Path $script:DownloadOutFiles[0] -Parent) | Should Not Be (Split-Path -Path $script:DownloadOutFiles[1] -Parent)
+        Test-Path -LiteralPath (Split-Path -Path $script:DownloadOutFiles[0] -Parent) | Should Be $false
+        Test-Path -LiteralPath (Split-Path -Path $script:DownloadOutFiles[1] -Parent) | Should Be $false
+    }
+
     It 'downloads one URI package to the admin workstation cache, stages it to one target, and returns package metadata' {
         $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'PackageCache'
         $uri = 'https://storage.contoso.example/packages/Install-EA.ps1'
@@ -1386,7 +1512,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:DownloadUris[0].OriginalString | Should Be $uri
         $script:DownloadOutFiles[0] | Should Match ([regex]::Escape($cacheRoot))
         $script:DownloadOutFiles[0] | Should Match ([regex]::Escape('Install-EA.ps1'))
-        Test-Path -LiteralPath $script:DownloadOutFiles[0] | Should Be $true
+        Test-Path -LiteralPath $script:DownloadOutFiles[0] | Should Be $false
         $result.PackageMetadata.PSTypeNames[0] | Should Be 'WinPush.PackageMetadata'
         $result.PackageMetadata.PackageSourceType | Should Be 'Uri'
         $result.PackageMetadata.PackageSource | Should Be $uri
@@ -1500,6 +1626,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         @($script:RemoteExtractions).Count | Should Be 1
         @($script:RemovedSessionIds).Count | Should Be 1
         $script:RemovedSessionIds[0] | Should Be $script:SessionToReturn.Id
+        Test-Path -LiteralPath (Split-Path -Path $script:DownloadOutFiles[0] -Parent) | Should Be $false
     }
 
     It 'rejects Extract for URI non-zip packages before downloading or opening an endpoint session' {
@@ -1539,6 +1666,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         @($script:RemoteDirectoriesCreated).Count | Should Be 0
         @($script:CopiedPaths).Count | Should Be 0
         @($script:DownloadUris).Count | Should Be 1
+        Test-Path -LiteralPath (Split-Path -Path $script:DownloadOutFiles[0] -Parent) | Should Be $false
     }
 
     It 'returns a failed URI package result when session creation fails after download' {
@@ -1562,6 +1690,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         @($script:RemoteDirectoriesCreated).Count | Should Be 0
         @($script:CopiedPaths).Count | Should Be 0
         @($script:RemovedSessionIds).Count | Should Be 0
+        Test-Path -LiteralPath (Split-Path -Path $script:DownloadOutFiles[0] -Parent) | Should Be $false
     }
 
     It 'passes the supplied credential object unchanged when staging a cached URI package' {
@@ -1808,14 +1937,18 @@ Describe 'WinPush package entry point helpers' {
         $result = Invoke-WinPushPsrpPackageEntryPoint `
             -Session $script:SessionToReturn `
             -PackageRoot 'C:\Stage\Package' `
-            -EntryPoint '.\Install-EA.ps1'
+            -EntryPoint '.\Install-EA.ps1' `
+            -ArgumentList @('one', 'two words')
 
         [object]::ReferenceEquals($script:InvokeCommandSessions[0], $script:SessionToReturn) | Should Be $true
         $script:InvokeCommandArgumentLists[0][0] | Should Be 'C:\Stage\Package'
         $script:InvokeCommandArgumentLists[0][1] | Should Be 'Install-EA.ps1'
+        @($script:InvokeCommandArgumentLists[0][2]).Count | Should Be 2
+        $script:InvokeCommandArgumentLists[0][2][0] | Should Be 'one'
+        $script:InvokeCommandArgumentLists[0][2][1] | Should Be 'two words'
         $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape('Set-Location -LiteralPath $WorkingDirectory'))
         $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape('Test-Path -LiteralPath $entryPointPath -PathType Leaf'))
-        $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape('& $entryPointPath 2>&1'))
+        $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape('& $entryPointPath @EntryPointArgumentList 2>&1'))
         $script:InvokeCommandScriptBlocks[0] | Should Match ([regex]::Escape("Stream = 'Error'"))
         $result.PSTypeNames[0] | Should Be 'WinPush.PsrpPackageEntryPointResult'
         $result.Output[0] | Should Be 'helper output'

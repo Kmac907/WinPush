@@ -18,9 +18,7 @@ param(
 
     [string] $PackageCacheRoot = (Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ('WinPushPackageLiveCache-{0}' -f ([guid]::NewGuid().ToString('N')))),
 
-    [string] $RemoteStageRoot = 'C:\ProgramData\WinPush\Staging',
-
-    [int] $HttpPort = 0
+    [string] $RemoteStageRoot = 'C:\ProgramData\WinPush\Staging'
 )
 
 Set-StrictMode -Version Latest
@@ -449,21 +447,12 @@ function New-WinPushLivePackageSource {
     $zipPackage = Join-Path -Path $Root -ChildPath 'WinPushLiveZipPackage.zip'
     Compress-Archive -Path (Join-Path -Path $zipRoot -ChildPath '*') -DestinationPath $zipPackage -Force
 
-    $uriEntry = 'WinPushLiveUri-{0}.ps1' -f $ValidationId
-    $uriRoot = Join-Path -Path $Root -ChildPath 'UriRoot'
-    New-Item -Path (Join-Path -Path $uriRoot -ChildPath 'payload') -ItemType Directory -Force | Out-Null
-    New-WinPushLiveEntryPointContent -ValidationId $ValidationId -Scenario 'uri' |
-        Set-Content -LiteralPath (Join-Path -Path $uriRoot -ChildPath $uriEntry) -Encoding utf8NoBOM
-    Set-Content -LiteralPath (Join-Path -Path $uriRoot -ChildPath 'payload\data.txt') -Value 'uri-payload' -Encoding utf8NoBOM
-    $uriPackage = Join-Path -Path $Root -ChildPath 'WinPushLiveUriPackage.zip'
-    Compress-Archive -Path (Join-Path -Path $uriRoot -ChildPath '*') -DestinationPath $uriPackage -Force
-
     $failureEntry = 'WinPushLiveFailure-{0}.ps1' -f $ValidationId
     $failurePackage = Join-Path -Path $Root -ChildPath $failureEntry
     New-WinPushLiveEntryPointContent -ValidationId $ValidationId -Scenario 'failure' -Fail |
         Set-Content -LiteralPath $failurePackage -Encoding utf8NoBOM
 
-    foreach ($entryName in @($fileEntry, $directoryEntry, $zipEntry, $uriEntry, $failureEntry)) {
+    foreach ($entryName in @($fileEntry, $directoryEntry, $zipEntry, $failureEntry)) {
         $script:RemoteLogCleanupPaths.Add((Join-Path -Path 'C:\ProgramData\EA\Logs' -ChildPath ([System.IO.Path]::GetFileNameWithoutExtension($entryName)))) | Out-Null
     }
 
@@ -474,115 +463,9 @@ function New-WinPushLivePackageSource {
         DirectoryEntry   = ".\$directoryEntry"
         ZipPackage       = $zipPackage
         ZipEntry         = ".\$zipEntry"
-        UriPackage       = $uriPackage
-        UriEntry         = ".\$uriEntry"
         FailurePackage   = $failurePackage
         FailureEntry     = ".\$failureEntry"
     }
-}
-
-function Get-WinPushLiveFreeTcpPort {
-    [CmdletBinding()]
-    param()
-
-    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse('127.0.0.1'), 0)
-    try {
-        $listener.Start()
-        [int] $listener.LocalEndpoint.Port
-    }
-    finally {
-        $listener.Stop()
-    }
-}
-
-function Start-WinPushLiveFileServer {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string] $Root,
-
-        [int] $Port = 0
-    )
-
-    $effectivePort = if ($Port -gt 0) { $Port } else { Get-WinPushLiveFreeTcpPort }
-    $job = Start-Job -Name ('WinPushPackageLiveUri-{0}' -f $effectivePort) -ScriptBlock {
-        param(
-            [string] $ServerRoot,
-            [int] $ServerPort
-        )
-
-        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Parse('127.0.0.1'), $ServerPort)
-        $listener.Start()
-        try {
-            while ($true) {
-                $client = $listener.AcceptTcpClient()
-                try {
-                    $stream = $client.GetStream()
-                    $reader = [System.IO.StreamReader]::new($stream, [System.Text.Encoding]::ASCII, $false, 1024, $true)
-                    $requestLine = $reader.ReadLine()
-                    do {
-                        $headerLine = $reader.ReadLine()
-                    } while ($null -ne $headerLine -and $headerLine.Length -gt 0)
-
-                    $statusLine = 'HTTP/1.1 404 Not Found'
-                    $contentType = 'text/plain'
-                    $body = [System.Text.Encoding]::UTF8.GetBytes('not found')
-                    if (-not [string]::IsNullOrWhiteSpace($requestLine)) {
-                        $requestParts = @($requestLine -split ' ')
-                        if ($requestParts.Count -ge 2 -and $requestParts[0] -eq 'GET') {
-                            $relative = [System.Uri]::UnescapeDataString($requestParts[1].TrimStart('/')).Replace('/', '\')
-                            if (-not [string]::IsNullOrWhiteSpace($relative) -and -not $relative.Contains('..')) {
-                                $candidate = Join-Path -Path $ServerRoot -ChildPath $relative
-                                $canonicalRoot = [System.IO.Path]::GetFullPath(('{0}\' -f $ServerRoot.TrimEnd('\')))
-                                $canonicalCandidate = [System.IO.Path]::GetFullPath($candidate)
-                                if (
-                                    $canonicalCandidate.StartsWith($canonicalRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
-                                    (Test-Path -LiteralPath $canonicalCandidate -PathType Leaf)
-                                ) {
-                                    $statusLine = 'HTTP/1.1 200 OK'
-                                    $contentType = 'application/octet-stream'
-                                    $body = [System.IO.File]::ReadAllBytes($canonicalCandidate)
-                                }
-                            }
-                        }
-                    }
-
-                    $header = "{0}`r`nContent-Type: {1}`r`nContent-Length: {2}`r`nConnection: close`r`n`r`n" -f $statusLine, $contentType, $body.Length
-                    $headerBytes = [System.Text.Encoding]::ASCII.GetBytes($header)
-                    $stream.Write($headerBytes, 0, $headerBytes.Length)
-                    $stream.Write($body, 0, $body.Length)
-                    $stream.Flush()
-                }
-                finally {
-                    $client.Close()
-                }
-            }
-        }
-        finally {
-            $listener.Stop()
-        }
-    } -ArgumentList $Root, $effectivePort
-
-    [pscustomobject] [ordered] @{
-        Job     = $job
-        Port    = $effectivePort
-        BaseUri = 'http://127.0.0.1:{0}/' -f $effectivePort
-    }
-}
-
-function Stop-WinPushLiveFileServer {
-    [CmdletBinding()]
-    param(
-        [AllowNull()]
-        [object] $Server
-    )
-
-    if ($null -eq $Server -or $null -eq $Server.Job) {
-        return
-    }
-
-    Stop-Job -Job $Server.Job -ErrorAction SilentlyContinue
-    Remove-Job -Job $Server.Job -Force -ErrorAction SilentlyContinue
 }
 
 function Invoke-WinPushLivePackageScenario {
@@ -612,8 +495,6 @@ function Invoke-WinPushLivePackageScenario {
 
 $exitCode = 0
 $scratchRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ('WinPushPackageLiveValidation-{0}' -f ([guid]::NewGuid().ToString('N')))
-$server = $null
-
 try {
     $repoRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..')
     $modulePath = Join-Path -Path $repoRoot -ChildPath 'WinPush.psd1'
@@ -656,13 +537,6 @@ try {
         $sources = New-WinPushLivePackageSource -Root $scratchRoot -ValidationId $validationId
         New-Item -Path $OutputRoot -ItemType Directory -Force | Out-Null
         New-Item -Path $PackageCacheRoot -ItemType Directory -Force | Out-Null
-        $server = Start-WinPushLiveFileServer -Root $scratchRoot -Port $HttpPort
-        Start-Sleep -Milliseconds 400
-        $uriPackageName = Split-Path -Path $sources.UriPackage -Leaf
-        $uriPackageSource = [uri] ('{0}{1}' -f $server.BaseUri, $uriPackageName)
-        $probePath = Join-Path -Path $scratchRoot -ChildPath 'uri-probe.zip'
-        Invoke-WebRequest -Uri $uriPackageSource -OutFile $probePath -ErrorAction Stop
-
         $basePackageParameters = @{
             ComputerName     = $ComputerName
             OutputRoot       = $OutputRoot
@@ -717,26 +591,6 @@ try {
         ) -Details $zipStageDirectory
         Test-WinPushLiveCaptureArtifact -Result $zipResult -ScenarioName 'local zip package' -ExpectedOutputText 'scenario=zip'
 
-        $uriParameters = $basePackageParameters.Clone()
-        $uriParameters.Remove('Path')
-        $uriParameters['Uri'] = $uriPackageSource
-        $uriParameters['EntryPoint'] = $sources.UriEntry
-        $uriParameters['Extract'] = $true
-        $uriParameters['Cleanup'] = 'Always'
-        $uriResult = Invoke-WinPushLivePackageScenario -Name 'URI package extract cleanup Always' -Parameters $uriParameters
-        $uriStageDirectory = Get-WinPushLiveRemoteStageDirectory -RemoteStagePath $uriResult.PackageMetadata.RemoteStagePath
-        Add-WinPushLiveCheck -Name 'URI package succeeded' -Passed $uriResult.Succeeded -Details (ConvertTo-WinPushLiveResultSummary -Result $uriResult)
-        Add-WinPushLiveCheck -Name 'URI package recorded source and admin cache path' -Passed (
-            $uriResult.PackageMetadata.PackageSourceType -eq 'Uri' -and
-            $uriResult.PackageMetadata.PackageSource -eq $uriPackageSource.OriginalString -and
-            -not [string]::IsNullOrWhiteSpace($uriResult.PackageMetadata.LocalPackagePath) -and
-            $uriResult.PackageMetadata.LocalPackagePath.StartsWith($PackageCacheRoot, [System.StringComparison]::OrdinalIgnoreCase)
-        ) -Details (ConvertTo-WinPushLiveResultSummary -Result $uriResult)
-        Add-WinPushLiveCheck -Name 'Cleanup Always removed successful URI remote package stage' -Passed (
-            -not [string]::IsNullOrWhiteSpace($uriStageDirectory) -and -not (Test-WinPushLiveRemotePath -Path $uriStageDirectory)
-        ) -Details $uriStageDirectory
-        Test-WinPushLiveCaptureArtifact -Result $uriResult -ScenarioName 'URI package' -ExpectedOutputText 'scenario=uri'
-
         $failureParameters = $basePackageParameters.Clone()
         $failureParameters['Path'] = $sources.FailurePackage
         $failureParameters['EntryPoint'] = $sources.FailureEntry
@@ -761,8 +615,6 @@ catch {
     $exitCode = 1
 }
 finally {
-    Stop-WinPushLiveFileServer -Server $server
-
     if (Test-Path -LiteralPath $scratchRoot) {
         Remove-Item -LiteralPath $scratchRoot -Recurse -Force -ErrorAction SilentlyContinue
     }

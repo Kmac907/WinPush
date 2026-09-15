@@ -76,6 +76,13 @@ function Invoke-WinPushPackage {
         [Parameter(Mandatory, Position = 2)]
         [string] $EntryPoint,
 
+        [object[]] $ArgumentList = @(),
+
+        [Parameter(ParameterSetName = 'UriComputerName')]
+        [Parameter(ParameterSetName = 'UriHostFile')]
+        [ValidatePattern('^[0-9A-Fa-f]{64}\z')]
+        [string] $ExpectedSha256,
+
         [switch] $Extract,
 
         [switch] $CaptureOutput,
@@ -109,8 +116,8 @@ function Invoke-WinPushPackage {
             throw [System.ArgumentException]::new('PackageCacheRoot must not be empty.')
         }
 
-        if ($PSBoundParameters.ContainsKey('RemoteStageRoot') -and [string]::IsNullOrWhiteSpace($RemoteStageRoot)) {
-            throw [System.ArgumentException]::new('RemoteStageRoot must not be empty.')
+        if (-not (Test-WinPushPackageAbsoluteWindowsPath -Path $RemoteStageRoot)) {
+            throw [System.ArgumentException]::new('RemoteStageRoot must be an absolute drive-rooted or UNC Windows path.')
         }
 
         $remoteLogDirectory = if ($Logs) { Get-WinPushScriptLogDirectory -ScriptPath $EntryPoint } else { $null }
@@ -132,58 +139,105 @@ function Invoke-WinPushPackage {
         $artifactError = $null
         $captureOutputEnabled = [bool] $CaptureOutput
         $logsEnabled = [bool] $Logs
-        if ($CaptureOutput -or $Logs) {
-            try {
-                $sharedRunDirectory = New-WinPushArtifactRunDirectory -OutputRoot $OutputRoot
-            }
-            catch {
-                $artifactError = $_.Exception.Message
-                $captureOutputEnabled = $false
-                $logsEnabled = $false
-            }
-        }
+        $cachePlan = $null
 
-        if ($isUriPackageSet) {
+        try {
+            if ($CaptureOutput -or $Logs) {
+                try {
+                    $sharedRunDirectory = New-WinPushArtifactRunDirectory -OutputRoot $OutputRoot
+                }
+                catch {
+                    $artifactError = $_.Exception.Message
+                    $captureOutputEnabled = $false
+                    $logsEnabled = $false
+                }
+            }
+
             $targets = @()
-            $cachePlan = $null
-            $localPackagePath = $null
+            $packageSourceType = if ($isUriPackageSet) { 'Uri' } else { 'Path' }
+            $packageSource = if ($isUriPackageSet) { $Uri.OriginalString } else { $Path }
+            $localPackagePath = if ($isUriPackageSet) { $null } else { $Path }
+            $packageIsDirectory = $false
+            $artifactIdentity = '{0}: {1}; EntryPoint: {2}' -f $packageSourceType, $packageSource, $EntryPoint
 
             try {
-                $targets = @(
-                    if ($isHostFileTargetSet) {
-                        Resolve-WinPushTarget -HostFile $HostFile
-                    }
-                    else {
-                        Resolve-WinPushTarget -ComputerName $computerNames.ToArray()
-                    }
-                )
-                $cachePlan = New-WinPushPackageCachePlan -Uri $Uri -PackageCacheRoot $PackageCacheRoot
-                if ($Extract -and [System.IO.Path]::GetExtension([string] $cachePlan.PackageFileName) -ne '.zip') {
-                    throw [System.ArgumentException]::new('Extract requires a staged .zip package file.')
-                }
+                if ($isUriPackageSet) {
+                    $targets = @(
+                        if ($isHostFileTargetSet) {
+                            Resolve-WinPushTarget -HostFile $HostFile
+                        }
+                        else {
+                            Resolve-WinPushTarget -ComputerName $computerNames.ToArray()
+                        }
+                    )
 
-                $localPackagePath = Save-WinPushPackageUriToCache -Uri $Uri -CachePlan $cachePlan
+                    $cachePlan = New-WinPushPackageCachePlan -Uri $Uri -PackageCacheRoot $PackageCacheRoot
+                    $localPackagePath = $cachePlan.LocalPackagePath
+                    if ($Extract -and [System.IO.Path]::GetExtension([string] $cachePlan.PackageFileName) -ne '.zip') {
+                        throw [System.ArgumentException]::new('Extract requires a staged .zip package file.')
+                    }
+
+                    $localPackagePath = Save-WinPushPackageUriToCache -Uri $Uri -CachePlan $cachePlan
+                    if ($PSBoundParameters.ContainsKey('ExpectedSha256')) {
+                        $actualSha256 = (Get-FileHash -LiteralPath $localPackagePath -Algorithm SHA256 -ErrorAction Stop).Hash
+                        if (-not $actualSha256.Equals($ExpectedSha256, [System.StringComparison]::OrdinalIgnoreCase)) {
+                            throw [System.IO.InvalidDataException]::new('Downloaded package SHA256 does not match ExpectedSha256.')
+                        }
+                    }
+                }
+                else {
+                    if ([string]::IsNullOrWhiteSpace($Path)) {
+                        throw [System.ArgumentException]::new('Path must not be empty.')
+                    }
+
+                    if (-not (Test-Path -LiteralPath $Path)) {
+                        throw [System.IO.FileNotFoundException]::new("Package file was not found: $Path")
+                    }
+
+                    $packageItem = Get-Item -LiteralPath $Path
+                    if ($packageItem.PSProvider.Name -ne 'FileSystem') {
+                        throw [System.ArgumentException]::new("Path must refer to a local package file or directory: $Path")
+                    }
+
+                    $localPackagePath = $packageItem.FullName
+                    $packageSource = $localPackagePath
+                    $packageIsDirectory = [bool] $packageItem.PSIsContainer
+                    $artifactIdentity = 'Path: {0}; EntryPoint: {1}' -f $packageSource, $EntryPoint
+                    if ($Extract -and ($packageIsDirectory -or [System.IO.Path]::GetExtension($localPackagePath) -ne '.zip')) {
+                        throw [System.ArgumentException]::new('Extract requires a staged .zip package file.')
+                    }
+
+                    $targets = @(
+                        if ($isHostFileTargetSet) {
+                            Resolve-WinPushTarget -HostFile $HostFile
+                        }
+                        else {
+                            Resolve-WinPushTarget -ComputerName $computerNames.ToArray()
+                        }
+                    )
+                }
             }
             catch {
-                $failureTargets = if ($targets.Count -gt 0) {
+                $failureTargets = if ($isUriPackageSet -and $targets.Count -gt 0) {
                     @($targets)
-                }
-                elseif ($computerNames.Count -gt 0) {
-                    @([string] $computerNames[0])
                 }
                 elseif ($isHostFileTargetSet -and -not [string]::IsNullOrWhiteSpace($HostFile)) {
                     @($HostFile)
                 }
+                elseif ($computerNames.Count -gt 0) {
+                    @([string] $computerNames[0])
+                }
                 else {
                     @('Unknown')
                 }
+
                 foreach ($failureTarget in $failureTargets) {
                     $metadata = $null
-                    if ($null -ne $cachePlan) {
+                    if ($isUriPackageSet -and $null -ne $cachePlan) {
                         $metadata = New-WinPushPackageInfo `
-                            -PackageSourceType Uri `
-                            -PackageSource $Uri.OriginalString `
-                            -LocalPackagePath $cachePlan.LocalPackagePath `
+                            -PackageSourceType $packageSourceType `
+                            -PackageSource $packageSource `
+                            -LocalPackagePath $localPackagePath `
                             -EntryPoint $EntryPoint `
                             -CleanupPolicy $Cleanup
                     }
@@ -205,7 +259,7 @@ function Invoke-WinPushPackage {
                         $result = Add-WinPushExecutionArtifact `
                             -Result $result `
                             -OutputRoot $OutputRoot `
-                            -ArtifactIdentity ('Uri: {0}; EntryPoint: {1}' -f $Uri.OriginalString, $EntryPoint) `
+                            -ArtifactIdentity $artifactIdentity `
                             -RunDirectory $sharedRunDirectory
                         if ($result.ArtifactError -ne $previousArtifactError) {
                             $artifactError = $result.ArtifactError
@@ -221,6 +275,15 @@ function Invoke-WinPushPackage {
                 }
 
                 return
+            }
+
+            $sourcePreparation = [pscustomobject] [ordered] @{
+                PSTypeName        = 'WinPush.PackageSourcePreparation'
+                PackageSourceType = $packageSourceType
+                PackageSource     = $packageSource
+                LocalPackagePath  = $localPackagePath
+                IsDirectory       = $packageIsDirectory
+                ArtifactIdentity  = $artifactIdentity
             }
 
             foreach ($target in $targets) {
@@ -244,8 +307,14 @@ function Invoke-WinPushPackage {
 
                     $sessionCreationStarted = $true
                     $session = New-PSSession @sessionParameters
-                    $stagePlan = New-WinPushPackageStagePlan -RemoteStageRoot $RemoteStageRoot -PackagePath $localPackagePath
-                    Invoke-WinPushPsrpPackageStage -Session $session -LocalPackagePath $localPackagePath -StagePlan $stagePlan
+                    $stagePlan = New-WinPushPackageStagePlan `
+                        -RemoteStageRoot $RemoteStageRoot `
+                        -PackagePath $sourcePreparation.LocalPackagePath `
+                        -Directory:$sourcePreparation.IsDirectory
+                    Invoke-WinPushPsrpPackageStage `
+                        -Session $session `
+                        -LocalPackagePath $sourcePreparation.LocalPackagePath `
+                        -StagePlan $stagePlan
                     $remoteStagePath = $stagePlan.RemotePackagePath
                     $packageRoot = $stagePlan.RemoteDirectory
                     if ($Extract) {
@@ -256,7 +325,11 @@ function Invoke-WinPushPackage {
                     }
 
                     $executionStarted = [datetime]::UtcNow
-                    $packageExecution = Invoke-WinPushPsrpPackageEntryPoint -Session $session -PackageRoot $packageRoot -EntryPoint $EntryPoint
+                    $packageExecution = Invoke-WinPushPsrpPackageEntryPoint `
+                        -Session $session `
+                        -PackageRoot $packageRoot `
+                        -EntryPoint $EntryPoint `
+                        -ArgumentList $ArgumentList
                     $executionEnded = [datetime]::UtcNow
                     $output = @($packageExecution.Output)
                     $errors = @($packageExecution.Errors)
@@ -264,9 +337,9 @@ function Invoke-WinPushPackage {
                     $exitCode = if ($succeeded) { 0 } else { 1 }
                     $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
                     $metadata = New-WinPushPackageInfo `
-                        -PackageSourceType Uri `
-                        -PackageSource $Uri.OriginalString `
-                        -LocalPackagePath $localPackagePath `
+                        -PackageSourceType $sourcePreparation.PackageSourceType `
+                        -PackageSource $sourcePreparation.PackageSource `
+                        -LocalPackagePath $sourcePreparation.LocalPackagePath `
                         -RemoteStagePath $remoteStagePath `
                         -EntryPoint $EntryPoint `
                         -Extracted $extracted `
@@ -292,7 +365,7 @@ function Invoke-WinPushPackage {
                         $result = Add-WinPushExecutionArtifact `
                             -Result $result `
                             -OutputRoot $OutputRoot `
-                            -ArtifactIdentity ('Uri: {0}; EntryPoint: {1}' -f $Uri.OriginalString, $EntryPoint) `
+                            -ArtifactIdentity $sourcePreparation.ArtifactIdentity `
                             -RunDirectory $sharedRunDirectory
                         $sharedRunDirectory = $result.RunDirectory
                         if ($result.ArtifactError -ne $previousArtifactError) {
@@ -341,8 +414,7 @@ function Invoke-WinPushPackage {
                     }
 
                     $metadata = $null
-                    if ($null -ne $cachePlan) {
-                        $metadataLocalPackagePath = if ([string]::IsNullOrWhiteSpace($localPackagePath)) { $cachePlan.LocalPackagePath } else { $localPackagePath }
+                    if ($isUriPackageSet -or $null -ne $stagePlan) {
                         $metadataRemoteStagePath = if ([string]::IsNullOrWhiteSpace($remoteStagePath)) {
                             if ($null -eq $stagePlan) { $null } else { $stagePlan.RemotePackagePath }
                         }
@@ -350,9 +422,9 @@ function Invoke-WinPushPackage {
                             $remoteStagePath
                         }
                         $metadata = New-WinPushPackageInfo `
-                            -PackageSourceType Uri `
-                            -PackageSource $Uri.OriginalString `
-                            -LocalPackagePath $metadataLocalPackagePath `
+                            -PackageSourceType $sourcePreparation.PackageSourceType `
+                            -PackageSource $sourcePreparation.PackageSource `
+                            -LocalPackagePath $sourcePreparation.LocalPackagePath `
                             -RemoteStagePath $metadataRemoteStagePath `
                             -EntryPoint $EntryPoint `
                             -Extracted $extracted `
@@ -379,7 +451,7 @@ function Invoke-WinPushPackage {
                         $result = Add-WinPushExecutionArtifact `
                             -Result $result `
                             -OutputRoot $OutputRoot `
-                            -ArtifactIdentity ('Uri: {0}; EntryPoint: {1}' -f $Uri.OriginalString, $EntryPoint) `
+                            -ArtifactIdentity $sourcePreparation.ArtifactIdentity `
                             -RunDirectory $sharedRunDirectory
                         $sharedRunDirectory = $result.RunDirectory
                         if ($result.ArtifactError -ne $previousArtifactError) {
@@ -421,269 +493,10 @@ function Invoke-WinPushPackage {
                     }
                 }
             }
-
-            return
         }
-
-        $resolvedPackagePath = $Path
-        $packageIsDirectory = $false
-        $targets = @()
-
-        try {
-            if ([string]::IsNullOrWhiteSpace($Path)) {
-                throw [System.ArgumentException]::new('Path must not be empty.')
-            }
-
-            if (-not (Test-Path -LiteralPath $Path)) {
-                throw [System.IO.FileNotFoundException]::new("Package file was not found: $Path")
-            }
-
-            $packageItem = Get-Item -LiteralPath $Path
-            if ($packageItem.PSProvider.Name -ne 'FileSystem') {
-                throw [System.ArgumentException]::new("Path must refer to a local package file or directory: $Path")
-            }
-
-            $resolvedPackagePath = $packageItem.FullName
-            $packageIsDirectory = [bool] $packageItem.PSIsContainer
-            if ($Extract -and ($packageIsDirectory -or [System.IO.Path]::GetExtension($resolvedPackagePath) -ne '.zip')) {
-                throw [System.ArgumentException]::new('Extract requires a staged .zip package file.')
-            }
-
-            $targets = @(
-                if ($isHostFileTargetSet) {
-                    Resolve-WinPushTarget -HostFile $HostFile
-                }
-                else {
-                    Resolve-WinPushTarget -ComputerName $computerNames.ToArray()
-                }
-            )
-        }
-        catch {
-            $resultComputerName = if ($isHostFileTargetSet -and -not [string]::IsNullOrWhiteSpace($HostFile)) {
-                $HostFile
-            }
-            elseif ($computerNames.Count -eq 1) {
-                [string] $computerNames[0]
-            }
-            elseif (-not [string]::IsNullOrWhiteSpace([string] $ComputerName)) {
-                [string] $ComputerName
-            }
-            else {
-                'Unknown'
-            }
-            $result = New-WinPushExecutionResult `
-                -ComputerName $resultComputerName `
-                -Transport 'Psrp' `
-                -Operation 'RunPackage' `
-                -Succeeded $false `
-                -ExitCode 1 `
-                -ErrorMessage $_.Exception.Message `
-                -ArtifactError $artifactError `
-                -Errors $_.Exception.Message `
-                -RunDirectory $sharedRunDirectory
-
-            if ($captureOutputEnabled -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
-                $result = Add-WinPushExecutionArtifact `
-                    -Result $result `
-                    -OutputRoot $OutputRoot `
-                    -ArtifactIdentity ('Path: {0}; EntryPoint: {1}' -f $resolvedPackagePath, $EntryPoint) `
-                    -RunDirectory $sharedRunDirectory
-            }
-
-            $result
-            return
-        }
-
-        foreach ($target in $targets) {
-            $session = $null
-            $stagePlan = $null
-            $remoteStagePath = $null
-            $extracted = $false
-            $executionStarted = $null
-            $executionEnded = $null
-            $sessionCreationStarted = $false
-
-            try {
-                $sessionParameters = @{
-                    ComputerName = $target
-                    ErrorAction  = 'Stop'
-                }
-
-                if ($PSBoundParameters.ContainsKey('Credential')) {
-                    $sessionParameters['Credential'] = $Credential
-                }
-
-                $sessionCreationStarted = $true
-                $session = New-PSSession @sessionParameters
-                $stagePlan = New-WinPushPackageStagePlan -RemoteStageRoot $RemoteStageRoot -PackagePath $resolvedPackagePath -Directory:$packageIsDirectory
-                Invoke-WinPushPsrpPackageStage -Session $session -LocalPackagePath $resolvedPackagePath -StagePlan $stagePlan
-                $remoteStagePath = $stagePlan.RemotePackagePath
-                $packageRoot = $stagePlan.RemoteDirectory
-                if ($Extract) {
-                    Invoke-WinPushPsrpPackageExtract -Session $session -StagePlan $stagePlan
-                    $remoteStagePath = $stagePlan.RemoteDirectory
-                    $packageRoot = $stagePlan.RemoteDirectory
-                    $extracted = $true
-                }
-
-                $executionStarted = [datetime]::UtcNow
-                $packageExecution = Invoke-WinPushPsrpPackageEntryPoint -Session $session -PackageRoot $packageRoot -EntryPoint $EntryPoint
-                $executionEnded = [datetime]::UtcNow
-                $output = @($packageExecution.Output)
-                $errors = @($packageExecution.Errors)
-                $succeeded = $errors.Count -eq 0
-                $exitCode = if ($succeeded) { 0 } else { 1 }
-                $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
-                $metadata = New-WinPushPackageInfo `
-                    -PackageSourceType Path `
-                    -PackageSource $resolvedPackagePath `
-                    -LocalPackagePath $resolvedPackagePath `
-                    -RemoteStagePath $remoteStagePath `
-                    -EntryPoint $EntryPoint `
-                    -Extracted $extracted `
-                    -ExecutionStarted $executionStarted `
-                    -ExecutionEnded $executionEnded `
-                    -CleanupPolicy $Cleanup
-
-                $result = New-WinPushExecutionResult `
-                    -ComputerName $target `
-                    -Transport 'Psrp' `
-                    -Operation 'RunPackage' `
-                    -Succeeded $succeeded `
-                    -ExitCode $exitCode `
-                    -ErrorMessage $errorMessage `
-                    -ArtifactError $artifactError `
-                    -Output $output `
-                    -Errors $errors `
-                    -RunDirectory $sharedRunDirectory `
-                    -PackageMetadata $metadata
-
-                if ($captureOutputEnabled) {
-                    $previousArtifactError = $result.ArtifactError
-                    $result = Add-WinPushExecutionArtifact `
-                        -Result $result `
-                        -OutputRoot $OutputRoot `
-                        -ArtifactIdentity ('Path: {0}; EntryPoint: {1}' -f $resolvedPackagePath, $EntryPoint) `
-                        -RunDirectory $sharedRunDirectory
-                    $sharedRunDirectory = $result.RunDirectory
-                    if ($result.ArtifactError -ne $previousArtifactError) {
-                        $artifactError = $result.ArtifactError
-                        $captureOutputEnabled = $false
-                    }
-                }
-
-                if ($logsEnabled) {
-                    if ([string]::IsNullOrWhiteSpace($result.RunDirectory) -and -not [string]::IsNullOrWhiteSpace($sharedRunDirectory)) {
-                        $result.RunDirectory = $sharedRunDirectory
-                    }
-
-                    $previousArtifactError = $result.ArtifactError
-                    $result = Add-WinPushExecutionLogArtifact `
-                        -Result $result `
-                        -Session $session `
-                        -OutputRoot $OutputRoot `
-                        -RemoteLogDirectory $remoteLogDirectory
-                    $sharedRunDirectory = $result.RunDirectory
-                    if ($result.ArtifactError -ne $previousArtifactError) {
-                        $artifactError = $result.ArtifactError
-                        $logsEnabled = $false
-                    }
-                }
-
-                $result = Set-WinPushPackageCleanupResult `
-                    -Result $result `
-                    -Session $session `
-                    -StagePlan $stagePlan `
-                    -RemoteStageRoot $RemoteStageRoot `
-                    -Cleanup $Cleanup
-
-                $result
-            }
-            catch {
-                if ($null -ne $executionStarted -and $null -eq $executionEnded) {
-                    $executionEnded = [datetime]::UtcNow
-                }
-
-                $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $sessionCreationStarted -and $null -eq $session) {
-                    'PSRP package staging session creation failed for the target with the supplied credential.'
-                }
-                else {
-                    $_.Exception.Message
-                }
-
-                $metadata = $null
-                if ($null -ne $stagePlan) {
-                    $metadataRemoteStagePath = if ([string]::IsNullOrWhiteSpace($remoteStagePath)) { $stagePlan.RemotePackagePath } else { $remoteStagePath }
-                    $metadata = New-WinPushPackageInfo `
-                        -PackageSourceType Path `
-                        -PackageSource $resolvedPackagePath `
-                        -LocalPackagePath $resolvedPackagePath `
-                        -RemoteStagePath $metadataRemoteStagePath `
-                        -EntryPoint $EntryPoint `
-                        -Extracted $extracted `
-                        -ExecutionStarted $executionStarted `
-                        -ExecutionEnded $executionEnded `
-                        -CleanupPolicy $Cleanup
-                }
-
-                $resultComputerName = if ([string]::IsNullOrWhiteSpace($target)) { [string] $ComputerName } else { $target }
-                $result = New-WinPushExecutionResult `
-                    -ComputerName $resultComputerName `
-                    -Transport 'Psrp' `
-                    -Operation 'RunPackage' `
-                    -Succeeded $false `
-                    -ExitCode 1 `
-                    -ErrorMessage $errorMessage `
-                    -ArtifactError $artifactError `
-                    -Errors $errorMessage `
-                    -RunDirectory $sharedRunDirectory `
-                    -PackageMetadata $metadata
-
-                if ($captureOutputEnabled -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
-                    $previousArtifactError = $result.ArtifactError
-                    $result = Add-WinPushExecutionArtifact `
-                        -Result $result `
-                        -OutputRoot $OutputRoot `
-                        -ArtifactIdentity ('Path: {0}; EntryPoint: {1}' -f $resolvedPackagePath, $EntryPoint) `
-                        -RunDirectory $sharedRunDirectory
-                    $sharedRunDirectory = $result.RunDirectory
-                    if ($result.ArtifactError -ne $previousArtifactError) {
-                        $artifactError = $result.ArtifactError
-                        $captureOutputEnabled = $false
-                    }
-                }
-
-                if ($logsEnabled -and $null -ne $session -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
-                    if ([string]::IsNullOrWhiteSpace($result.RunDirectory) -and -not [string]::IsNullOrWhiteSpace($sharedRunDirectory)) {
-                        $result.RunDirectory = $sharedRunDirectory
-                    }
-
-                    $previousArtifactError = $result.ArtifactError
-                    $result = Add-WinPushExecutionLogArtifact `
-                        -Result $result `
-                        -Session $session `
-                        -OutputRoot $OutputRoot `
-                        -RemoteLogDirectory $remoteLogDirectory
-                    $sharedRunDirectory = $result.RunDirectory
-                    if ($result.ArtifactError -ne $previousArtifactError) {
-                        $artifactError = $result.ArtifactError
-                        $logsEnabled = $false
-                    }
-                }
-
-                $result = Set-WinPushPackageCleanupResult `
-                    -Result $result `
-                    -Session $session `
-                    -StagePlan $stagePlan `
-                    -RemoteStageRoot $RemoteStageRoot `
-                    -Cleanup $Cleanup
-
-                $result
-            }
-            finally {
-                if ($null -ne $session) {
-                    Remove-PSSession -Id $session.Id -ErrorAction SilentlyContinue
-                }
+        finally {
+            if ($null -ne $cachePlan -and (Test-Path -LiteralPath $cachePlan.CacheDirectory)) {
+                Remove-Item -LiteralPath $cachePlan.CacheDirectory -Recurse -Force -ErrorAction SilentlyContinue
             }
         }
     }
