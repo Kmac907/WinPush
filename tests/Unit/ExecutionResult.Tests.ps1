@@ -11,7 +11,7 @@ Describe 'New-WinPushExecutionResult' {
         $propertyNames = @($result.PSObject.Properties.Name)
 
         $result.PSTypeNames[0] | Should Be 'WinPush.ExecutionResult'
-        ($propertyNames -join ',') | Should Be 'ComputerName,Transport,Operation,Succeeded,ExitCode,ErrorMessage,Output,Errors,Logs,RunDirectory,ComputerDirectory,ResultPath,StdOutPath,StdErrPath,CopiedLogPaths,PackageMetadata,Script'
+        ($propertyNames -join ',') | Should Be 'ComputerName,Transport,Operation,Succeeded,ExitCode,ErrorMessage,ArtifactError,Output,Errors,Logs,RunDirectory,ComputerDirectory,ResultPath,StdOutPath,StdErrPath,CopiedLogPaths,PackageMetadata,Script'
         ($propertyNames -contains 'Credential') | Should Be $false
         ($propertyNames -contains 'Password') | Should Be $false
     }
@@ -55,6 +55,15 @@ Describe 'New-WinPushExecutionResult' {
         @($result.Errors).Count | Should Be 0
         @($result.Logs).Count | Should Be 1
         $result.Logs[0] | Should Be 'started'
+    }
+
+    It 'carries artifact errors separately from remote execution errors' {
+        $result = New-WinPushExecutionResult -ComputerName 'PC-001' -Transport 'PSRP' -Operation 'RunCommand' -Succeeded $true -ExitCode 0 -ArtifactError 'disk full'
+
+        $result.Succeeded | Should Be $true
+        $result.ErrorMessage | Should BeNullOrEmpty
+        $result.ArtifactError | Should Be 'disk full'
+        $result.PSTypeNames[1] | Should Be 'WinPush.ExecutionResult.RunCommand'
     }
 
     It 'captures a failed execution result' {

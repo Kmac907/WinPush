@@ -1,6 +1,7 @@
 $script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..')
 $script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Targeting\Resolve-WinPushTarget.ps1'
 $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushExecutionResult.ps1'
+$script:ResultArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\Add-WinPushExecutionArtifact.ps1'
 $script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushLogResult.ps1'
 $script:PackageInfoPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushPackageInfo.ps1'
 $script:PsrpCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Copy-WinPushPsrpItem.ps1'
@@ -13,6 +14,7 @@ $script:PackageCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\
 
 . $script:ResolverPath
 . $script:ResultFactoryPath
+. $script:ResultArtifactPath
 . $script:LogResultFactoryPath
 . $script:PackageInfoPath
 . $script:PsrpCopyPath
@@ -532,7 +534,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
         $result.PackageMetadata.LogsCopied | Should Be $true
         $result.PackageMetadata.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
-        $result.RunDirectory | Should Be (Join-Path -Path $TestDrive -ChildPath 'run-logs')
+        $result.RunDirectory | Should Be $script:CopiedLogRunDirectories[0]
         $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
         @($script:CopiedLogSessions).Count | Should Be 1
         [object]::ReferenceEquals($script:PackageExecutionSessions[0], $script:CopiedLogSessions[0]) | Should Be $true
@@ -1294,7 +1296,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $results[0].RunDirectory | Should Be $results[1].RunDirectory
         $results[0].ComputerDirectory | Should Be (Join-Path -Path $results[0].RunDirectory -ChildPath 'PC-001')
         $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
-        $script:CopiedLogRunDirectories[0] | Should BeNullOrEmpty
+        $script:CopiedLogRunDirectories[0] | Should Be $results[0].RunDirectory
         $script:CopiedLogRunDirectories[1] | Should Be $results[0].RunDirectory
     }
 

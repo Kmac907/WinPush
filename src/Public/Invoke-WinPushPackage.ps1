@@ -1,105 +1,3 @@
-function Add-WinPushPackageCaptureOutputArtifact {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [psobject] $Result,
-
-        [Parameter(Mandatory)]
-        [string] $OutputRoot,
-
-        [Parameter(Mandatory)]
-        [string] $ArtifactIdentity,
-
-        [AllowNull()]
-        [string] $RunDirectory
-    )
-
-    $artifact = Write-WinPushCommandOutputArtifact `
-        -OutputRoot $OutputRoot `
-        -ComputerName $Result.ComputerName `
-        -Output $Result.Output `
-        -Errors $Result.Errors `
-        -RunDirectory $RunDirectory `
-        -Operation $Result.Operation `
-        -Transport $Result.Transport `
-        -ArtifactIdentity $ArtifactIdentity `
-        -Succeeded $Result.Succeeded `
-        -ExitCode $Result.ExitCode `
-        -ErrorMessage $Result.ErrorMessage
-
-    $Result.RunDirectory = $artifact.RunDirectory
-    $Result.ComputerDirectory = $artifact.ComputerDirectory
-    $Result.ResultPath = $artifact.ResultPath
-    $Result.StdOutPath = $artifact.StdOutPath
-    $Result.StdErrPath = $artifact.StdErrPath
-
-    $Result
-}
-
-function Add-WinPushPackageLogArtifact {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [psobject] $Result,
-
-        [Parameter(Mandatory)]
-        [object] $Session,
-
-        [Parameter(Mandatory)]
-        [string] $OutputRoot,
-
-        [Parameter(Mandatory)]
-        [string] $RemoteLogDirectory
-    )
-
-    $logResults = @()
-    $copiedLogPaths = @()
-
-    try {
-        $logCopy = Copy-WinPushPsrpLogDirectory `
-            -Session $Session `
-            -ComputerName $Result.ComputerName `
-            -RemoteDirectory $RemoteLogDirectory `
-            -OutputRoot $OutputRoot `
-            -RunDirectory $Result.RunDirectory `
-            -ComputerDirectory $Result.ComputerDirectory
-
-        $Result.RunDirectory = $logCopy.RunDirectory
-        $Result.ComputerDirectory = $logCopy.ComputerDirectory
-        $logResults = @($logCopy.Logs)
-        $copiedLogPaths = @($logCopy.CopiedLogPaths)
-    }
-    catch {
-        if ([string]::IsNullOrWhiteSpace($Result.RunDirectory) -or [string]::IsNullOrWhiteSpace($Result.ComputerDirectory)) {
-            $artifactDirectory = New-WinPushLogArtifactDirectory `
-                -OutputRoot $OutputRoot `
-                -ComputerName $Result.ComputerName `
-                -RunDirectory $Result.RunDirectory
-
-            $Result.RunDirectory = $artifactDirectory.RunDirectory
-            $Result.ComputerDirectory = $artifactDirectory.ComputerDirectory
-        }
-
-        $logResults = @(
-            New-WinPushLogResult `
-                -ComputerName $Result.ComputerName `
-                -RemotePath $RemoteLogDirectory `
-                -Copied $false `
-                -ErrorMessage $_.Exception.Message
-        )
-    }
-
-    $Result.Logs = $logResults
-    $Result.CopiedLogPaths = $copiedLogPaths
-
-    if ($null -ne $Result.PackageMetadata) {
-        $Result.PackageMetadata.LogsCopied = $copiedLogPaths.Count -gt 0
-        $Result.PackageMetadata.CopiedLogPaths = $copiedLogPaths
-    }
-
-    $Result
-}
-
 function Set-WinPushPackageCleanupResult {
     [CmdletBinding()]
     param(
@@ -231,6 +129,19 @@ function Invoke-WinPushPackage {
         $isHostFileTargetSet = $PSCmdlet.ParameterSetName.EndsWith('HostFile', [System.StringComparison]::Ordinal)
         $isUriPackageSet = $PSCmdlet.ParameterSetName.StartsWith('Uri', [System.StringComparison]::Ordinal)
         $sharedRunDirectory = $null
+        $artifactError = $null
+        $captureOutputEnabled = [bool] $CaptureOutput
+        $logsEnabled = [bool] $Logs
+        if ($CaptureOutput -or $Logs) {
+            try {
+                $sharedRunDirectory = New-WinPushArtifactRunDirectory -OutputRoot $OutputRoot
+            }
+            catch {
+                $artifactError = $_.Exception.Message
+                $captureOutputEnabled = $false
+                $logsEnabled = $false
+            }
+        }
 
         if ($isUriPackageSet) {
             $targets = @()
@@ -284,15 +195,22 @@ function Invoke-WinPushPackage {
                         -Succeeded $false `
                         -ExitCode 1 `
                         -ErrorMessage $_.Exception.Message `
+                        -ArtifactError $artifactError `
                         -Errors $_.Exception.Message `
+                        -RunDirectory $sharedRunDirectory `
                         -PackageMetadata $metadata
 
-                    if ($CaptureOutput -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
-                        $result = Add-WinPushPackageCaptureOutputArtifact `
+                    if ($captureOutputEnabled -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
+                        $previousArtifactError = $result.ArtifactError
+                        $result = Add-WinPushExecutionArtifact `
                             -Result $result `
                             -OutputRoot $OutputRoot `
                             -ArtifactIdentity ('Uri: {0}; EntryPoint: {1}' -f $Uri.OriginalString, $EntryPoint) `
                             -RunDirectory $sharedRunDirectory
+                        if ($result.ArtifactError -ne $previousArtifactError) {
+                            $artifactError = $result.ArtifactError
+                            $captureOutputEnabled = $false
+                        }
                     }
 
                     if (-not [string]::IsNullOrWhiteSpace($result.RunDirectory)) {
@@ -363,30 +281,42 @@ function Invoke-WinPushPackage {
                         -Succeeded $succeeded `
                         -ExitCode $exitCode `
                         -ErrorMessage $errorMessage `
+                        -ArtifactError $artifactError `
                         -Output $output `
                         -Errors $errors `
+                        -RunDirectory $sharedRunDirectory `
                         -PackageMetadata $metadata
 
-                    if ($CaptureOutput) {
-                        $result = Add-WinPushPackageCaptureOutputArtifact `
+                    if ($captureOutputEnabled) {
+                        $previousArtifactError = $result.ArtifactError
+                        $result = Add-WinPushExecutionArtifact `
                             -Result $result `
                             -OutputRoot $OutputRoot `
                             -ArtifactIdentity ('Uri: {0}; EntryPoint: {1}' -f $Uri.OriginalString, $EntryPoint) `
                             -RunDirectory $sharedRunDirectory
                         $sharedRunDirectory = $result.RunDirectory
+                        if ($result.ArtifactError -ne $previousArtifactError) {
+                            $artifactError = $result.ArtifactError
+                            $captureOutputEnabled = $false
+                        }
                     }
 
-                    if ($Logs) {
+                    if ($logsEnabled) {
                         if ([string]::IsNullOrWhiteSpace($result.RunDirectory) -and -not [string]::IsNullOrWhiteSpace($sharedRunDirectory)) {
                             $result.RunDirectory = $sharedRunDirectory
                         }
 
-                        $result = Add-WinPushPackageLogArtifact `
+                        $previousArtifactError = $result.ArtifactError
+                        $result = Add-WinPushExecutionLogArtifact `
                             -Result $result `
                             -Session $session `
                             -OutputRoot $OutputRoot `
                             -RemoteLogDirectory $remoteLogDirectory
                         $sharedRunDirectory = $result.RunDirectory
+                        if ($result.ArtifactError -ne $previousArtifactError) {
+                            $artifactError = $result.ArtifactError
+                            $logsEnabled = $false
+                        }
                     }
 
                     $result = Set-WinPushPackageCleanupResult `
@@ -439,29 +369,41 @@ function Invoke-WinPushPackage {
                         -Succeeded $false `
                         -ExitCode 1 `
                         -ErrorMessage $errorMessage `
+                        -ArtifactError $artifactError `
                         -Errors $errorMessage `
+                        -RunDirectory $sharedRunDirectory `
                         -PackageMetadata $metadata
 
-                    if ($CaptureOutput -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
-                        $result = Add-WinPushPackageCaptureOutputArtifact `
+                    if ($captureOutputEnabled -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
+                        $previousArtifactError = $result.ArtifactError
+                        $result = Add-WinPushExecutionArtifact `
                             -Result $result `
                             -OutputRoot $OutputRoot `
                             -ArtifactIdentity ('Uri: {0}; EntryPoint: {1}' -f $Uri.OriginalString, $EntryPoint) `
                             -RunDirectory $sharedRunDirectory
                         $sharedRunDirectory = $result.RunDirectory
+                        if ($result.ArtifactError -ne $previousArtifactError) {
+                            $artifactError = $result.ArtifactError
+                            $captureOutputEnabled = $false
+                        }
                     }
 
-                    if ($Logs -and $null -ne $session -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
+                    if ($logsEnabled -and $null -ne $session -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
                         if ([string]::IsNullOrWhiteSpace($result.RunDirectory) -and -not [string]::IsNullOrWhiteSpace($sharedRunDirectory)) {
                             $result.RunDirectory = $sharedRunDirectory
                         }
 
-                        $result = Add-WinPushPackageLogArtifact `
+                        $previousArtifactError = $result.ArtifactError
+                        $result = Add-WinPushExecutionLogArtifact `
                             -Result $result `
                             -Session $session `
                             -OutputRoot $OutputRoot `
                             -RemoteLogDirectory $remoteLogDirectory
                         $sharedRunDirectory = $result.RunDirectory
+                        if ($result.ArtifactError -ne $previousArtifactError) {
+                            $artifactError = $result.ArtifactError
+                            $logsEnabled = $false
+                        }
                     }
 
                     $result = Set-WinPushPackageCleanupResult `
@@ -536,10 +478,12 @@ function Invoke-WinPushPackage {
                 -Succeeded $false `
                 -ExitCode 1 `
                 -ErrorMessage $_.Exception.Message `
-                -Errors $_.Exception.Message
+                -ArtifactError $artifactError `
+                -Errors $_.Exception.Message `
+                -RunDirectory $sharedRunDirectory
 
-            if ($CaptureOutput -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
-                $result = Add-WinPushPackageCaptureOutputArtifact `
+            if ($captureOutputEnabled -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
+                $result = Add-WinPushExecutionArtifact `
                     -Result $result `
                     -OutputRoot $OutputRoot `
                     -ArtifactIdentity ('Path: {0}; EntryPoint: {1}' -f $resolvedPackagePath, $EntryPoint) `
@@ -608,30 +552,42 @@ function Invoke-WinPushPackage {
                     -Succeeded $succeeded `
                     -ExitCode $exitCode `
                     -ErrorMessage $errorMessage `
+                    -ArtifactError $artifactError `
                     -Output $output `
                     -Errors $errors `
+                    -RunDirectory $sharedRunDirectory `
                     -PackageMetadata $metadata
 
-                if ($CaptureOutput) {
-                    $result = Add-WinPushPackageCaptureOutputArtifact `
+                if ($captureOutputEnabled) {
+                    $previousArtifactError = $result.ArtifactError
+                    $result = Add-WinPushExecutionArtifact `
                         -Result $result `
                         -OutputRoot $OutputRoot `
                         -ArtifactIdentity ('Path: {0}; EntryPoint: {1}' -f $resolvedPackagePath, $EntryPoint) `
                         -RunDirectory $sharedRunDirectory
                     $sharedRunDirectory = $result.RunDirectory
+                    if ($result.ArtifactError -ne $previousArtifactError) {
+                        $artifactError = $result.ArtifactError
+                        $captureOutputEnabled = $false
+                    }
                 }
 
-                if ($Logs) {
+                if ($logsEnabled) {
                     if ([string]::IsNullOrWhiteSpace($result.RunDirectory) -and -not [string]::IsNullOrWhiteSpace($sharedRunDirectory)) {
                         $result.RunDirectory = $sharedRunDirectory
                     }
 
-                    $result = Add-WinPushPackageLogArtifact `
+                    $previousArtifactError = $result.ArtifactError
+                    $result = Add-WinPushExecutionLogArtifact `
                         -Result $result `
                         -Session $session `
                         -OutputRoot $OutputRoot `
                         -RemoteLogDirectory $remoteLogDirectory
                     $sharedRunDirectory = $result.RunDirectory
+                    if ($result.ArtifactError -ne $previousArtifactError) {
+                        $artifactError = $result.ArtifactError
+                        $logsEnabled = $false
+                    }
                 }
 
                 $result = Set-WinPushPackageCleanupResult `
@@ -678,29 +634,41 @@ function Invoke-WinPushPackage {
                     -Succeeded $false `
                     -ExitCode 1 `
                     -ErrorMessage $errorMessage `
+                    -ArtifactError $artifactError `
                     -Errors $errorMessage `
+                    -RunDirectory $sharedRunDirectory `
                     -PackageMetadata $metadata
 
-                if ($CaptureOutput -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
-                    $result = Add-WinPushPackageCaptureOutputArtifact `
+                if ($captureOutputEnabled -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
+                    $previousArtifactError = $result.ArtifactError
+                    $result = Add-WinPushExecutionArtifact `
                         -Result $result `
                         -OutputRoot $OutputRoot `
                         -ArtifactIdentity ('Path: {0}; EntryPoint: {1}' -f $resolvedPackagePath, $EntryPoint) `
                         -RunDirectory $sharedRunDirectory
                     $sharedRunDirectory = $result.RunDirectory
+                    if ($result.ArtifactError -ne $previousArtifactError) {
+                        $artifactError = $result.ArtifactError
+                        $captureOutputEnabled = $false
+                    }
                 }
 
-                if ($Logs -and $null -ne $session -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
+                if ($logsEnabled -and $null -ne $session -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
                     if ([string]::IsNullOrWhiteSpace($result.RunDirectory) -and -not [string]::IsNullOrWhiteSpace($sharedRunDirectory)) {
                         $result.RunDirectory = $sharedRunDirectory
                     }
 
-                    $result = Add-WinPushPackageLogArtifact `
+                    $previousArtifactError = $result.ArtifactError
+                    $result = Add-WinPushExecutionLogArtifact `
                         -Result $result `
                         -Session $session `
                         -OutputRoot $OutputRoot `
                         -RemoteLogDirectory $remoteLogDirectory
                     $sharedRunDirectory = $result.RunDirectory
+                    if ($result.ArtifactError -ne $previousArtifactError) {
+                        $artifactError = $result.ArtifactError
+                        $logsEnabled = $false
+                    }
                 }
 
                 $result = Set-WinPushPackageCleanupResult `

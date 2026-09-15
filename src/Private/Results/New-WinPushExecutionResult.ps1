@@ -21,6 +21,9 @@ function New-WinPushExecutionResult {
         [string] $ErrorMessage = $null,
 
         [AllowNull()]
+        [string] $ArtifactError = $null,
+
+        [AllowNull()]
         [object[]] $Output = @(),
 
         [AllowNull()]
@@ -54,25 +57,10 @@ function New-WinPushExecutionResult {
         [string] $Script = $null
     )
 
-    [object[]] $normalizedOutput = @()
-    if ($null -ne $Output) {
-        $normalizedOutput = @($Output)
-    }
-
-    [object[]] $normalizedErrors = @()
-    if ($null -ne $Errors) {
-        $normalizedErrors = @($Errors)
-    }
-
-    [object[]] $normalizedLogs = @()
-    if ($null -ne $Logs) {
-        $normalizedLogs = @($Logs)
-    }
-
-    [object[]] $normalizedCopiedLogPaths = @()
-    if ($null -ne $CopiedLogPaths) {
-        $normalizedCopiedLogPaths = @($CopiedLogPaths)
-    }
+    [object[]] $normalizedOutput = @($Output | Where-Object { $null -ne $_ })
+    [object[]] $normalizedErrors = @($Errors | Where-Object { $null -ne $_ })
+    [object[]] $normalizedLogs = @($Logs | Where-Object { $null -ne $_ })
+    [object[]] $normalizedCopiedLogPaths = @($CopiedLogPaths | Where-Object { $null -ne $_ })
 
     if (-not $Succeeded -and [string]::IsNullOrWhiteSpace($ErrorMessage) -and $normalizedErrors.Count -gt 0) {
         $ErrorMessage = [string] $normalizedErrors[0]
@@ -93,6 +81,7 @@ function New-WinPushExecutionResult {
         Succeeded         = $Succeeded
         ExitCode          = $ExitCode
         ErrorMessage      = $ErrorMessage
+        ArtifactError     = $ArtifactError
         Output            = $normalizedOutput
         Errors            = $normalizedErrors
         Logs              = $normalizedLogs

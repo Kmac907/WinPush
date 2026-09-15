@@ -1,6 +1,7 @@
 $script:ModuleRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -ChildPath '..\..')
 $script:ResolverPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Targeting\Resolve-WinPushTarget.ps1'
 $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushExecutionResult.ps1'
+$script:ResultArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\Add-WinPushExecutionArtifact.ps1'
 $script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushLogResult.ps1'
 $script:ArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
 $script:NativeProcessPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushNativeProcess.ps1'
@@ -15,6 +16,7 @@ $script:ScriptCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\P
 
 . $script:ResolverPath
 . $script:ResultFactoryPath
+. $script:ResultArtifactPath
 . $script:LogResultFactoryPath
 . $script:ArtifactPath
 . $script:NativeProcessPath
@@ -632,7 +634,7 @@ Describe 'Invoke-WinPushScript' {
         $result.Logs[0].PSTypeNames[0] | Should Be 'WinPush.LogResult'
         $result.Logs[0].RemotePath | Should Be 'C:\ProgramData\EA\Logs\Install-EA\script.log'
         $result.CopiedLogPaths[0] | Should Be $result.Logs[0].LocalPath
-        $result.RunDirectory | Should Be (Join-Path -Path $TestDrive -ChildPath 'run-logs')
+        $result.RunDirectory | Should Be $script:CopiedLogRunDirectories[0]
         $result.ComputerDirectory | Should Be (Join-Path -Path $result.RunDirectory -ChildPath 'PC-001')
         @($script:CopiedLogSessions).Count | Should Be 1
         [object]::ReferenceEquals($script:CopiedLogSessions[0], $script:SessionToReturn) | Should Be $true

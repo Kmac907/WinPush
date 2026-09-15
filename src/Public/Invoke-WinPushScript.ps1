@@ -87,16 +87,22 @@ function Invoke-WinPushScript {
         }
 
         $sharedRunDirectory = $null
+        $artifactError = $null
+        $captureOutputEnabled = [bool] $CaptureOutput
+        $logsEnabled = [bool] $Logs
+        if ($CaptureOutput -or $Logs) {
+            try {
+                $sharedRunDirectory = New-WinPushArtifactRunDirectory -OutputRoot $OutputRoot
+            }
+            catch {
+                $artifactError = $_.Exception.Message
+                $captureOutputEnabled = $false
+                $logsEnabled = $false
+            }
+        }
 
         foreach ($target in $targets) {
             $session = $null
-            $runDirectory = $null
-            $computerDirectory = $null
-            $resultPath = $null
-            $stdOutPath = $null
-            $stdErrPath = $null
-            $logResults = @()
-            $copiedLogPaths = @()
             $sessionParameters = @{
                 ComputerName = $target
                 ErrorAction  = 'Stop'
@@ -176,210 +182,104 @@ function Invoke-WinPushScript {
                     }
                 }
 
-                if ($CaptureOutput) {
-                    $artifact = Write-WinPushCommandOutputArtifact `
-                        -OutputRoot $OutputRoot `
-                        -ComputerName $target `
-                        -Output $output `
-                        -Errors $errors `
-                        -RunDirectory $sharedRunDirectory `
-                        -Operation 'RunScript' `
-                        -Transport $Transport `
-                        -ArtifactIdentity $resolvedScriptPath `
-                        -Succeeded $succeeded `
-                        -ExitCode $exitCode `
-                        -ErrorMessage $errorMessage
-                    $sharedRunDirectory = $artifact.RunDirectory
-                    $runDirectory = $artifact.RunDirectory
-                    $computerDirectory = $artifact.ComputerDirectory
-                    $resultPath = $artifact.ResultPath
-                    $stdOutPath = $artifact.StdOutPath
-                    $stdErrPath = $artifact.StdErrPath
-                }
-
-                New-WinPushExecutionResult `
+                $result = New-WinPushExecutionResult `
                     -ComputerName $target `
                     -Transport $Transport `
                     -Operation 'RunScript' `
                     -Succeeded $succeeded `
                     -ExitCode $exitCode `
                     -ErrorMessage $errorMessage `
+                    -ArtifactError $artifactError `
                     -Output $output `
                     -Errors $errors `
-                    -RunDirectory $runDirectory `
-                    -ComputerDirectory $computerDirectory `
-                    -ResultPath $resultPath `
-                    -StdOutPath $stdOutPath `
-                    -StdErrPath $stdErrPath `
+                    -RunDirectory $sharedRunDirectory `
                     -Script $scriptDisplayName
 
+                if ($captureOutputEnabled) {
+                    $result = Add-WinPushExecutionArtifact `
+                        -Result $result `
+                        -OutputRoot $OutputRoot `
+                        -ArtifactIdentity $resolvedScriptPath
+                    if ($null -ne $result.ArtifactError) {
+                        $artifactError = $result.ArtifactError
+                        $captureOutputEnabled = $false
+                    }
+                }
+
+                $result
                 continue
             }
 
             try {
-                $session = New-PSSession @sessionParameters
-                $scriptResult = Invoke-WinPushPsrpScript -Session $session -FilePath $resolvedScriptPath
-                $output = @($scriptResult.Output)
-                $errors = @($scriptResult.Errors)
-                $succeeded = $errors.Count -eq 0
-                $exitCode = if ($succeeded) { 0 } else { 1 }
-                $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
+                try {
+                    $session = New-PSSession @sessionParameters
+                    $scriptResult = Invoke-WinPushPsrpScript -Session $session -FilePath $resolvedScriptPath
+                    $output = @($scriptResult.Output)
+                    $errors = @($scriptResult.Errors)
+                    $succeeded = $errors.Count -eq 0
+                    $exitCode = if ($succeeded) { 0 } else { 1 }
+                    $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
 
-                if ($CaptureOutput) {
-                    $artifact = Write-WinPushCommandOutputArtifact `
-                        -OutputRoot $OutputRoot `
+                    $result = New-WinPushExecutionResult `
                         -ComputerName $target `
+                        -Transport 'Psrp' `
+                        -Operation 'RunScript' `
+                        -Succeeded $succeeded `
+                        -ExitCode $exitCode `
+                        -ErrorMessage $errorMessage `
+                        -ArtifactError $artifactError `
                         -Output $output `
                         -Errors $errors `
                         -RunDirectory $sharedRunDirectory `
-                        -Operation 'RunScript' `
-                        -Transport 'Psrp' `
-                        -ArtifactIdentity $resolvedScriptPath `
-                        -Succeeded $succeeded `
-                        -ExitCode $exitCode `
-                        -ErrorMessage $errorMessage
-                    $sharedRunDirectory = $artifact.RunDirectory
-                    $runDirectory = $artifact.RunDirectory
-                    $computerDirectory = $artifact.ComputerDirectory
-                    $resultPath = $artifact.ResultPath
-                    $stdOutPath = $artifact.StdOutPath
-                    $stdErrPath = $artifact.StdErrPath
+                        -Script $scriptDisplayName
                 }
-
-                if ($Logs) {
-                    try {
-                        $logCopy = Copy-WinPushPsrpLogDirectory `
-                            -Session $session `
-                            -ComputerName $target `
-                            -RemoteDirectory $remoteLogDirectory `
-                            -OutputRoot $OutputRoot `
-                            -RunDirectory $sharedRunDirectory `
-                            -ComputerDirectory $computerDirectory
-                        $sharedRunDirectory = $logCopy.RunDirectory
-                        $runDirectory = $logCopy.RunDirectory
-                        $computerDirectory = $logCopy.ComputerDirectory
-                        $logResults = @($logCopy.Logs)
-                        $copiedLogPaths = @($logCopy.CopiedLogPaths)
+                catch {
+                    $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $null -eq $session) {
+                        'PSRP script session creation failed for the target with the supplied credential.'
                     }
-                    catch {
-                        if ([string]::IsNullOrWhiteSpace($runDirectory) -or [string]::IsNullOrWhiteSpace($computerDirectory)) {
-                            $artifactDirectory = New-WinPushLogArtifactDirectory `
-                                -OutputRoot $OutputRoot `
-                                -ComputerName $target `
-                                -RunDirectory $sharedRunDirectory
-                            $sharedRunDirectory = $artifactDirectory.RunDirectory
-                            $runDirectory = $artifactDirectory.RunDirectory
-                            $computerDirectory = $artifactDirectory.ComputerDirectory
-                        }
-
-                        $logResults = @(
-                            New-WinPushLogResult `
-                                -ComputerName $target `
-                                -RemotePath $remoteLogDirectory `
-                                -Copied $false `
-                                -ErrorMessage $_.Exception.Message
-                        )
+                    else {
+                        $_.Exception.Message
                     }
-                }
 
-                New-WinPushExecutionResult `
-                    -ComputerName $target `
-                    -Transport 'Psrp' `
-                    -Operation 'RunScript' `
-                    -Succeeded $succeeded `
-                    -ExitCode $exitCode `
-                    -ErrorMessage $errorMessage `
-                    -Output $output `
-                    -Errors $errors `
-                    -RunDirectory $runDirectory `
-                    -ComputerDirectory $computerDirectory `
-                    -ResultPath $resultPath `
-                    -StdOutPath $stdOutPath `
-                    -StdErrPath $stdErrPath `
-                    -Logs $logResults `
-                    -CopiedLogPaths $copiedLogPaths `
-                    -Script $scriptDisplayName
-            }
-            catch {
-                $errorMessage = if ($PSBoundParameters.ContainsKey('Credential') -and $null -eq $session) {
-                    'PSRP script session creation failed for the target with the supplied credential.'
-                }
-                else {
-                    $_.Exception.Message
-                }
-
-                if ($CaptureOutput) {
-                    $artifact = Write-WinPushCommandOutputArtifact `
-                        -OutputRoot $OutputRoot `
+                    $result = New-WinPushExecutionResult `
                         -ComputerName $target `
-                        -Errors $errorMessage `
-                        -RunDirectory $sharedRunDirectory `
-                        -Operation 'RunScript' `
                         -Transport 'Psrp' `
-                        -ArtifactIdentity $resolvedScriptPath `
+                        -Operation 'RunScript' `
                         -Succeeded $false `
                         -ExitCode 1 `
-                        -ErrorMessage $errorMessage
-                    $sharedRunDirectory = $artifact.RunDirectory
-                    $runDirectory = $artifact.RunDirectory
-                    $computerDirectory = $artifact.ComputerDirectory
-                    $resultPath = $artifact.ResultPath
-                    $stdOutPath = $artifact.StdOutPath
-                    $stdErrPath = $artifact.StdErrPath
+                        -ErrorMessage $errorMessage `
+                        -ArtifactError $artifactError `
+                        -Errors $errorMessage `
+                        -RunDirectory $sharedRunDirectory `
+                        -Script $scriptDisplayName
                 }
 
-                if ($Logs -and $null -ne $session) {
-                    try {
-                        $logCopy = Copy-WinPushPsrpLogDirectory `
-                            -Session $session `
-                            -ComputerName $target `
-                            -RemoteDirectory $remoteLogDirectory `
-                            -OutputRoot $OutputRoot `
-                            -RunDirectory $sharedRunDirectory `
-                            -ComputerDirectory $computerDirectory
-                        $sharedRunDirectory = $logCopy.RunDirectory
-                        $runDirectory = $logCopy.RunDirectory
-                        $computerDirectory = $logCopy.ComputerDirectory
-                        $logResults = @($logCopy.Logs)
-                        $copiedLogPaths = @($logCopy.CopiedLogPaths)
-                    }
-                    catch {
-                        if ([string]::IsNullOrWhiteSpace($runDirectory) -or [string]::IsNullOrWhiteSpace($computerDirectory)) {
-                            $artifactDirectory = New-WinPushLogArtifactDirectory `
-                                -OutputRoot $OutputRoot `
-                                -ComputerName $target `
-                                -RunDirectory $sharedRunDirectory
-                            $sharedRunDirectory = $artifactDirectory.RunDirectory
-                            $runDirectory = $artifactDirectory.RunDirectory
-                            $computerDirectory = $artifactDirectory.ComputerDirectory
-                        }
-
-                        $logResults = @(
-                            New-WinPushLogResult `
-                                -ComputerName $target `
-                                -RemotePath $remoteLogDirectory `
-                                -Copied $false `
-                                -ErrorMessage $_.Exception.Message
-                        )
+                if ($captureOutputEnabled) {
+                    $previousArtifactError = $result.ArtifactError
+                    $result = Add-WinPushExecutionArtifact `
+                        -Result $result `
+                        -OutputRoot $OutputRoot `
+                        -ArtifactIdentity $resolvedScriptPath
+                    if ($result.ArtifactError -ne $previousArtifactError) {
+                        $artifactError = $result.ArtifactError
+                        $captureOutputEnabled = $false
                     }
                 }
 
-                New-WinPushExecutionResult `
-                    -ComputerName $target `
-                    -Transport 'Psrp' `
-                    -Operation 'RunScript' `
-                    -Succeeded $false `
-                    -ExitCode 1 `
-                    -ErrorMessage $errorMessage `
-                    -Errors $errorMessage `
-                    -RunDirectory $runDirectory `
-                    -ComputerDirectory $computerDirectory `
-                    -ResultPath $resultPath `
-                    -StdOutPath $stdOutPath `
-                    -StdErrPath $stdErrPath `
-                    -Logs $logResults `
-                    -CopiedLogPaths $copiedLogPaths `
-                    -Script $scriptDisplayName
+                if ($logsEnabled -and $null -ne $session) {
+                    $previousArtifactError = $result.ArtifactError
+                    $result = Add-WinPushExecutionLogArtifact `
+                        -Result $result `
+                        -Session $session `
+                        -OutputRoot $OutputRoot `
+                        -RemoteLogDirectory $remoteLogDirectory
+                    if ($result.ArtifactError -ne $previousArtifactError) {
+                        $artifactError = $result.ArtifactError
+                        $logsEnabled = $false
+                    }
+                }
+
+                $result
             }
             finally {
                 if ($null -ne $session) {
