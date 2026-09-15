@@ -394,29 +394,29 @@ Describe 'Get-WinPushLog' {
         @($script:RemovedSessionIds).Count | Should Be 1
     }
 
-    It 'runs pipeline ComputerName strings in resolved order' {
+    It 'runs pipeline <InputType> in resolved order' -TestCases @(
+        @{ InputType = 'ComputerName strings' }
+        @{ InputType = 'objects by ComputerName property' }
+    ) {
+        param($InputType)
+
         $script:LogMetadataToReturn = @()
-
-        $results = @(@($script:TargetName, $script:OtherTargetName) | Get-WinPushLog -RemoteDirectory 'C:\ProgramData\EA\Logs\Empty' -OutputRoot $TestDrive)
-
-        @($results).Count | Should Be 2
-        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
-        ($results.Succeeded -join ',') | Should Be 'True,True'
-        $results[0].RunDirectory | Should Be $results[1].RunDirectory
-        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
-    }
-
-    It 'runs pipeline objects by ComputerName property in resolved order' {
-        $script:LogMetadataToReturn = @()
-        $targets = @(
-            [pscustomobject] @{ ComputerName = $script:TargetName },
-            [pscustomobject] @{ ComputerName = $script:OtherTargetName }
-        )
+        if ($InputType -eq 'ComputerName strings') {
+            $targets = @($script:TargetName, $script:OtherTargetName)
+        }
+        else {
+            $targets = @(
+                [pscustomobject] @{ ComputerName = $script:TargetName },
+                [pscustomobject] @{ ComputerName = $script:OtherTargetName }
+            )
+        }
 
         $results = @($targets | Get-WinPushLog -RemoteDirectory 'C:\ProgramData\EA\Logs\Empty' -OutputRoot $TestDrive)
 
         @($results).Count | Should Be 2
         ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($results.Succeeded -join ',') | Should Be 'True,True'
+        $results[0].RunDirectory | Should Be $results[1].RunDirectory
         ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
     }
 

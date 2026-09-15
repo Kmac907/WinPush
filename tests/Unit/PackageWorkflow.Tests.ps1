@@ -1148,28 +1148,26 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $results[2].PackageMetadata.PackageSourceType | Should Be 'Path'
     }
 
-    It 'runs pipeline ComputerName strings for package targets in resolved order' {
-        $results = @(@(' PC-001 ', 'pc-001', 'PC-002') | Invoke-WinPushPackage `
-                -Path $script:FixtureScriptPackage `
-                -EntryPoint '.\Install-EA.ps1')
+    It 'runs pipeline <InputType> for package targets in resolved order' -TestCases @(
+        @{ InputType = 'ComputerName strings' }
+        @{ InputType = 'objects with ComputerName property' }
+    ) {
+        param($InputType)
 
-        @($results).Count | Should Be 2
-        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
-        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
-        @($script:PackageExecutionEntryPoints).Count | Should Be 2
-        @($script:RemovedSessionIds).Count | Should Be 2
-    }
+        if ($InputType -eq 'ComputerName strings') {
+            $targets = @(' PC-001 ', 'pc-001', 'PC-002')
+        }
+        else {
+            $targets = @(
+                [pscustomobject] @{ ComputerName = ' PC-001 ' }
+                [pscustomobject] @{ ComputerName = 'pc-001' }
+                [pscustomobject] @{ ComputerName = 'PC-002' }
+            )
+        }
 
-    It 'runs pipeline objects with ComputerName property for package targets in resolved order' {
-        $pipelineTargets = @(
-            [pscustomobject] @{ ComputerName = ' PC-001 ' }
-            [pscustomobject] @{ ComputerName = 'pc-001' }
-            [pscustomobject] @{ ComputerName = 'PC-002' }
-        )
-
-        $results = @($pipelineTargets | Invoke-WinPushPackage `
-                -Path $script:FixtureScriptPackage `
-                -EntryPoint '.\Install-EA.ps1')
+        $results = @($targets | Invoke-WinPushPackage `
+            -Path $script:FixtureScriptPackage `
+            -EntryPoint '.\Install-EA.ps1')
 
         @($results).Count | Should Be 2
         ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
@@ -1218,38 +1216,30 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         @($script:CopiedPaths).Count | Should Be 0
     }
 
-    It 'continues to later package targets after one target session fails' {
+    It 'continues to later <Source> package targets after one target session fails' -TestCases @(
+        @{ Source = 'direct ComputerName' }
+        @{ Source = 'HostFile' }
+    ) {
+        param($Source)
+
         $script:NewPSSessionErrorsByComputerName = @{
             'PC-002' = 'connection failed'
         }
 
-        $results = @(Invoke-WinPushPackage `
+        if ($Source -eq 'direct ComputerName') {
+            $results = @(Invoke-WinPushPackage `
                 -ComputerName @('PC-001', 'PC-002', 'PC-003') `
                 -Path $script:FixtureScriptPackage `
                 -EntryPoint '.\Install-EA.ps1')
-
-        @($results).Count | Should Be 3
-        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        $results[0].Succeeded | Should Be $true
-        $results[1].Succeeded | Should Be $false
-        $results[1].ErrorMessage | Should Be 'connection failed'
-        $results[2].Succeeded | Should Be $true
-        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        @($script:PackageExecutionEntryPoints).Count | Should Be 2
-        @($script:RemovedSessionIds).Count | Should Be 2
-    }
-
-    It 'continues to later HostFile package targets after one target session fails' {
-        $hostFile = Join-Path -Path $TestDrive -ChildPath 'mixed-package-hosts.txt'
-        @('PC-001', 'PC-002', 'PC-003') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
-        $script:NewPSSessionErrorsByComputerName = @{
-            'PC-002' = 'connection failed'
         }
-
-        $results = @(Invoke-WinPushPackage `
+        else {
+            $hostFile = Join-Path -Path $TestDrive -ChildPath 'mixed-package-hosts.txt'
+            @('PC-001', 'PC-002', 'PC-003') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+            $results = @(Invoke-WinPushPackage `
                 -HostFile $hostFile `
                 -Path $script:FixtureScriptPackage `
                 -EntryPoint '.\Install-EA.ps1')
+        }
 
         @($results).Count | Should Be 3
         ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
@@ -1735,26 +1725,24 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         @($script:CopiedPaths).Count | Should Be 0
     }
 
-    It 'runs pipeline ComputerName strings for URI package targets in resolved order' {
-        $results = @(@(' PC-001 ', 'pc-001', 'PC-002') | Invoke-WinPushPackage `
-            -Uri 'https://storage.contoso.example/packages/EA.zip' `
-            -EntryPoint '.\Install-EA.ps1')
+    It 'runs pipeline <InputType> for URI package targets in resolved order' -TestCases @(
+        @{ InputType = 'ComputerName strings' }
+        @{ InputType = 'objects with ComputerName property' }
+    ) {
+        param($InputType)
 
-        @($results).Count | Should Be 2
-        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002'
-        @($script:DownloadUris).Count | Should Be 1
-        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002'
-        @($script:RemovedSessionIds).Count | Should Be 2
-    }
+        if ($InputType -eq 'ComputerName strings') {
+            $targets = @(' PC-001 ', 'pc-001', 'PC-002')
+        }
+        else {
+            $targets = @(
+                [pscustomobject] @{ ComputerName = ' PC-001 ' }
+                [pscustomobject] @{ ComputerName = 'pc-001' }
+                [pscustomobject] @{ ComputerName = 'PC-002' }
+            )
+        }
 
-    It 'runs pipeline objects with ComputerName property for URI package targets in resolved order' {
-        $pipelineTargets = @(
-            [pscustomobject] @{ ComputerName = ' PC-001 ' }
-            [pscustomobject] @{ ComputerName = 'pc-001' }
-            [pscustomobject] @{ ComputerName = 'PC-002' }
-        )
-
-        $results = @($pipelineTargets | Invoke-WinPushPackage `
+        $results = @($targets | Invoke-WinPushPackage `
             -Uri 'https://storage.contoso.example/packages/EA.zip' `
             -EntryPoint '.\Install-EA.ps1')
 

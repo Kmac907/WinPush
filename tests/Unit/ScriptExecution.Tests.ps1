@@ -413,46 +413,34 @@ Describe 'Invoke-WinPushScript' {
         @($script:NewPSSessionCredentials).Count | Should Be 0
     }
 
-    It 'passes the supplied credential object unchanged for direct ComputerName targets' {
-        $credential = New-TestCredential -Secret 'Distinctive-5.3-Credential-Secret!'
+    It 'passes the supplied credential object unchanged for <Source> targets' -TestCases @(
+        @{ Source = 'direct ComputerName'; ExpectedCount = 1 }
+        @{ Source = 'pipeline'; ExpectedCount = 2 }
+        @{ Source = 'host file'; ExpectedCount = 2 }
+    ) {
+        param($Source, $ExpectedCount)
 
-        $result = Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Credential $credential
-
-        $result.Succeeded | Should Be $true
-        @($script:NewPSSessionCredentials).Count | Should Be 1
-        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
-    }
-
-    It 'passes the supplied credential object unchanged for pipeline targets' {
         $credential = New-TestCredential -Secret 'Distinctive-5.3-Credential-Secret!'
         $script:SessionIdByComputerName = @{
             'PC-001' = 301
             'PC-002' = 302
         }
 
-        $results = @(@('PC-001', 'PC-002') | Invoke-WinPushScript -ScriptPath $script:FixtureScript -Credential $credential)
-
-        @($results).Count | Should Be 2
-        @($script:NewPSSessionCredentials).Count | Should Be 2
-        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
-        [object]::ReferenceEquals($script:NewPSSessionCredentials[1], $credential) | Should Be $true
-    }
-
-    It 'passes the supplied credential object unchanged for host file targets' {
-        $credential = New-TestCredential -Secret 'Distinctive-5.3-Credential-Secret!'
-        $script:SessionIdByComputerName = @{
-            'PC-001' = 301
-            'PC-002' = 302
+        switch ($Source) {
+            'direct ComputerName' { $results = @(Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Credential $credential) }
+            'pipeline' { $results = @(@('PC-001', 'PC-002') | Invoke-WinPushScript -ScriptPath $script:FixtureScript -Credential $credential) }
+            'host file' {
+                $hostFile = Join-Path -Path $TestDrive -ChildPath 'credential-hosts.txt'
+                @('PC-001', 'PC-002') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+                $results = @(Invoke-WinPushScript -HostFile $hostFile -ScriptPath $script:FixtureScript -Credential $credential)
+            }
         }
-        $hostFile = Join-Path -Path $TestDrive -ChildPath 'hosts.txt'
-        @('PC-001', 'PC-002') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
 
-        $results = @(Invoke-WinPushScript -HostFile $hostFile -ScriptPath $script:FixtureScript -Credential $credential)
-
-        @($results).Count | Should Be 2
-        @($script:NewPSSessionCredentials).Count | Should Be 2
-        [object]::ReferenceEquals($script:NewPSSessionCredentials[0], $credential) | Should Be $true
-        [object]::ReferenceEquals($script:NewPSSessionCredentials[1], $credential) | Should Be $true
+        @($results).Count | Should Be $ExpectedCount
+        @($script:NewPSSessionCredentials).Count | Should Be $ExpectedCount
+        foreach ($actualCredential in $script:NewPSSessionCredentials) {
+            [object]::ReferenceEquals($actualCredential, $credential) | Should Be $true
+        }
     }
 
     It 'normalizes credential session failures without leaking distinctive secret material' {
@@ -484,14 +472,39 @@ Describe 'Invoke-WinPushScript' {
         $result.ErrorMessage | Should Be 'script invocation failed'
     }
 
-    It 'runs direct ComputerName arrays in resolved order without duplicate targets' {
+    It 'runs <Source> targets in resolved order without duplicate targets' -TestCases @(
+        @{ Source = 'direct ComputerName' }
+        @{ Source = 'pipeline ComputerName strings' }
+        @{ Source = 'pipeline objects' }
+        @{ Source = 'HostFile' }
+    ) {
+        param($Source)
+
         $script:SessionIdByComputerName = @{
             'PC-001' = 301
             'PC-002' = 302
             'PC-003' = 303
         }
 
-        $results = @(Invoke-WinPushScript -ComputerName @(' PC-001 ', 'pc-001', 'PC-002', 'PC-003') -ScriptPath $script:FixtureScript)
+        switch ($Source) {
+            'direct ComputerName' { $results = @(Invoke-WinPushScript -ComputerName @(' PC-001 ', 'pc-001', 'PC-002', 'PC-003') -ScriptPath $script:FixtureScript) }
+            'pipeline ComputerName strings' { $results = @(@(' PC-001 ', 'pc-001', 'PC-002', 'PC-003') | Invoke-WinPushScript -ScriptPath $script:FixtureScript) }
+            'pipeline objects' {
+                $targets = @(
+                    [pscustomobject] @{ ComputerName = ' PC-001 ' }
+                    [pscustomobject] @{ ComputerName = 'pc-001' }
+                    [pscustomobject] @{ ComputerName = 'PC-002' }
+                    [pscustomobject] @{ ComputerName = 'PC-003' }
+                )
+                $results = @($targets | Invoke-WinPushScript -ScriptPath $script:FixtureScript)
+            }
+            'HostFile' {
+                $hostFile = Join-Path -Path $TestDrive -ChildPath 'resolved-hosts.txt'
+                @(' PC-001 ', 'pc-001', '# ignored comment', '', 'PC-002', 'PC-003') |
+                    Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+                $results = @(Invoke-WinPushScript -HostFile $hostFile -ScriptPath $script:FixtureScript)
+            }
+        }
 
         @($results).Count | Should Be 3
         ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
@@ -500,70 +513,13 @@ Describe 'Invoke-WinPushScript' {
         ($script:RemovedSessionIds -join ',') | Should Be '301,302,303'
     }
 
-    It 'runs pipeline ComputerName strings in resolved order without duplicate targets' {
-        $script:SessionIdByComputerName = @{
-            'PC-001' = 301
-            'PC-002' = 302
-            'PC-003' = 303
-        }
+    It 'continues to later <Source> targets after one target fails' -TestCases @(
+        @{ Source = 'direct ComputerName' }
+        @{ Source = 'pipeline ComputerName' }
+        @{ Source = 'HostFile' }
+    ) {
+        param($Source)
 
-        $results = @(@(' PC-001 ', 'pc-001', 'PC-002', 'PC-003') | Invoke-WinPushScript -ScriptPath $script:FixtureScript)
-
-        @($results).Count | Should Be 3
-        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        ($script:RemovedSessionIds -join ',') | Should Be '301,302,303'
-    }
-
-    It 'runs pipeline objects with ComputerName property in resolved order without duplicate targets' {
-        $script:SessionIdByComputerName = @{
-            'PC-001' = 301
-            'PC-002' = 302
-            'PC-003' = 303
-        }
-        $pipelineTargets = @(
-            [pscustomobject] @{ ComputerName = ' PC-001 ' }
-            [pscustomobject] @{ ComputerName = 'pc-001' }
-            [pscustomobject] @{ ComputerName = 'PC-002' }
-            [pscustomobject] @{ ComputerName = 'PC-003' }
-        )
-
-        $results = @($pipelineTargets | Invoke-WinPushScript -ScriptPath $script:FixtureScript)
-
-        @($results).Count | Should Be 3
-        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        ($script:RemovedSessionIds -join ',') | Should Be '301,302,303'
-    }
-
-    It 'runs HostFile targets in resolved order without duplicate targets' {
-        $script:SessionIdByComputerName = @{
-            'PC-001' = 301
-            'PC-002' = 302
-            'PC-003' = 303
-        }
-        $hostFile = Join-Path -Path $TestDrive -ChildPath 'hosts.txt'
-        @(
-            ' PC-001 '
-            'pc-001'
-            '# ignored comment'
-            ''
-            'PC-002'
-            'PC-003'
-        ) | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
-
-        $results = @(Invoke-WinPushScript -HostFile $hostFile -ScriptPath $script:FixtureScript)
-
-        @($results).Count | Should Be 3
-        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        ($script:RemovedSessionIds -join ',') | Should Be '301,302,303'
-    }
-
-    It 'continues to later direct ComputerName targets after one target fails' {
         $script:SessionIdByComputerName = @{
             'PC-001' = 301
             'PC-003' = 303
@@ -572,53 +528,15 @@ Describe 'Invoke-WinPushScript' {
             'PC-002' = 'connection failed'
         }
 
-        $results = @(Invoke-WinPushScript -ComputerName @('PC-001', 'PC-002', 'PC-003') -ScriptPath $script:FixtureScript)
-
-        @($results).Count | Should Be 3
-        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        $results[0].Succeeded | Should Be $true
-        $results[1].Succeeded | Should Be $false
-        $results[1].ErrorMessage | Should Be 'connection failed'
-        $results[2].Succeeded | Should Be $true
-        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-003'
-        ($script:RemovedSessionIds -join ',') | Should Be '301,303'
-    }
-
-    It 'continues to later pipeline ComputerName targets after one target fails' {
-        $script:SessionIdByComputerName = @{
-            'PC-001' = 301
-            'PC-003' = 303
+        switch ($Source) {
+            'direct ComputerName' { $results = @(Invoke-WinPushScript -ComputerName @('PC-001', 'PC-002', 'PC-003') -ScriptPath $script:FixtureScript) }
+            'pipeline ComputerName' { $results = @(@('PC-001', 'PC-002', 'PC-003') | Invoke-WinPushScript -ScriptPath $script:FixtureScript) }
+            'HostFile' {
+                $hostFile = Join-Path -Path $TestDrive -ChildPath 'continuation-hosts.txt'
+                @('PC-001', 'PC-002', 'PC-003') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
+                $results = @(Invoke-WinPushScript -HostFile $hostFile -ScriptPath $script:FixtureScript)
+            }
         }
-        $script:NewPSSessionErrorsByComputerName = @{
-            'PC-002' = 'connection failed'
-        }
-
-        $results = @(@('PC-001', 'PC-002', 'PC-003') | Invoke-WinPushScript -ScriptPath $script:FixtureScript)
-
-        @($results).Count | Should Be 3
-        ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        $results[0].Succeeded | Should Be $true
-        $results[1].Succeeded | Should Be $false
-        $results[1].ErrorMessage | Should Be 'connection failed'
-        $results[2].Succeeded | Should Be $true
-        ($script:NewPSSessionComputerNames -join ',') | Should Be 'PC-001,PC-002,PC-003'
-        ($script:InvokedSessionComputerNames -join ',') | Should Be 'PC-001,PC-003'
-        ($script:RemovedSessionIds -join ',') | Should Be '301,303'
-    }
-
-    It 'continues to later HostFile targets after one target fails' {
-        $script:SessionIdByComputerName = @{
-            'PC-001' = 301
-            'PC-003' = 303
-        }
-        $script:NewPSSessionErrorsByComputerName = @{
-            'PC-002' = 'connection failed'
-        }
-        $hostFile = Join-Path -Path $TestDrive -ChildPath 'hosts.txt'
-        @('PC-001', 'PC-002', 'PC-003') | Set-Content -LiteralPath $hostFile -Encoding utf8NoBOM
-
-        $results = @(Invoke-WinPushScript -HostFile $hostFile -ScriptPath $script:FixtureScript)
 
         @($results).Count | Should Be 3
         ($results.ComputerName -join ',') | Should Be 'PC-001,PC-002,PC-003'
@@ -1257,19 +1175,45 @@ Describe 'Invoke-WinPushScript' {
         ($script:OperationOrder -join ',') | Should Be 'Stage:PC-001,Native:PC-001,Cleanup:PC-001'
     }
 
-    It 'rejects native script credentials before launching a native process' {
+    It 'rejects <Transport> script credentials before launching a native process' -TestCases @(
+        @{ Transport = 'WinRM' }
+        @{ Transport = 'PsExec' }
+    ) {
+        param($Transport)
+
         $credential = New-TestCredential -Secret 'Distinctive-native-script-secret!'
 
-        { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM -Credential $credential } |
-            Should Throw 'Credential is not supported when Transport is WinRM.'
+        if ($Transport -eq 'PsExec') {
+            $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-credential.exe'
+            Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+            $operation = { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport PsExec -PsExecPath $psExecPath -Credential $credential }
+        }
+        else {
+            $operation = { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM -Credential $credential }
+        }
+
+        $operation | Should Throw "Credential is not supported when Transport is $Transport."
 
         @($script:NativeProcessFilePaths).Count | Should Be 0
         @($script:NewPSSessionComputerNames).Count | Should Be 0
     }
 
-    It 'rejects native script attached logs before launching a native process' {
-        { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM -Logs -OutputRoot $TestDrive } |
-            Should Throw 'Logs is not supported when Transport is WinRM.'
+    It 'rejects <Transport> script attached logs before launching a native process' -TestCases @(
+        @{ Transport = 'WinRM' }
+        @{ Transport = 'PsExec' }
+    ) {
+        param($Transport)
+
+        if ($Transport -eq 'PsExec') {
+            $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-logs.exe'
+            Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+            $operation = { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport PsExec -PsExecPath $psExecPath -Logs -OutputRoot $TestDrive }
+        }
+        else {
+            $operation = { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM -Logs -OutputRoot $TestDrive }
+        }
+
+        $operation | Should Throw "Logs is not supported when Transport is $Transport."
 
         @($script:NativeProcessFilePaths).Count | Should Be 0
         @($script:NewPSSessionComputerNames).Count | Should Be 0
