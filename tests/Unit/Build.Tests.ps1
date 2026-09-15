@@ -17,8 +17,18 @@ function Invoke-WinPushCommand {
 Describe 'WinPush build gate' {
     It 'pins and invokes Pester 3.4.0 through the imported module command' {
         $script:BuildText | Should Match 'requiredPesterVersion = \[version\] ''3\.4\.0'''
+        $script:BuildText | Should Match 'Where-Object \{ \$_\.Version -eq \$requiredPesterVersion \}'
         $script:BuildText | Should Match 'Import-Module -Name \$availablePester\.Path -Force -PassThru'
         $script:BuildText | Should Match '& \$invokePester @pesterParameters'
+        $script:BuildText | Should Match 'Required Pester version \$requiredPesterVersion is not available\.'
+        $script:BuildText | Should Not Match '(?i)\b(?:Install-Module|Save-Module|Invoke-WebRequest)\b'
+    }
+
+    It 'fails command coverage below 82.09 percent' {
+        $script:BuildText | Should Match 'minimumCoveragePercent = 82\.09'
+        $script:BuildText | Should Match '100 \* \$coverage\.NumberOfCommandsExecuted / \$coverage\.NumberOfCommandsAnalyzed'
+        $script:BuildText | Should Match 'if \(\$coveragePercent -lt \$minimumCoveragePercent\)'
+        $script:BuildText | Should Match 'below the required \$minimumCoveragePercent percent\.'
     }
 
     It 'imports the WinPush manifest once' {
@@ -36,6 +46,7 @@ Describe 'WinPush build gate' {
         $script:BuildText | Should Match 'IsNullOrWhiteSpace\(\$PsrpTarget\)[\s\S]+-ComputerName \$PsrpTarget -Transport Psrp'
         $script:BuildText | Should Match 'IsNullOrWhiteSpace\(\$WinRsTarget\)[\s\S]+-ComputerName \$WinRsTarget -Transport WinRM'
         $script:BuildText | Should Match 'IsNullOrWhiteSpace\(\$PsExecTarget\)[\s\S]+-ComputerName \$PsExecTarget -Transport PsExec -PsExecPath \$PsExecPath'
+        $script:BuildText | Should Not Match '\$env:'
     }
 
     It 'requires an explicit existing executable for a PsExec target' {

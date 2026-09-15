@@ -23,6 +23,7 @@ $buildPath = Join-Path -Path $repoRoot -ChildPath 'build'
 $settingsPath = Join-Path -Path $repoRoot -ChildPath 'PSScriptAnalyzerSettings.psd1'
 $smokeScriptPath = Join-Path -Path $testsPath -ChildPath 'Integration\Invoke-WinPushTransportSmoke.ps1'
 $requiredPesterVersion = [version] '3.4.0'
+$minimumCoveragePercent = 82.09
 
 if ([string]::IsNullOrWhiteSpace($ArtifactsPath)) {
     $ArtifactsPath = Join-Path -Path $repoRoot -ChildPath 'artifacts\build'
@@ -103,16 +104,23 @@ if ($coverageTargets) {
 
 $testResult = & $invokePester @pesterParameters
 
-if ($testResult.PSObject.Properties.Name -contains 'CodeCoverage') {
-    $testResult.CodeCoverage | Out-File -FilePath $coverageSummaryPath -Encoding utf8
-}
-else {
-    'Code coverage summary was not exposed by the installed Pester version.' |
-        Out-File -FilePath $coverageSummaryPath -Encoding utf8
-}
-
 if ($testResult.FailedCount -gt 0) {
     throw "Pester reported $($testResult.FailedCount) failing test(s)."
+}
+
+if ($testResult.PSObject.Properties.Name -notcontains 'CodeCoverage' -or $null -eq $testResult.CodeCoverage) {
+    throw 'Pester did not return code coverage results.'
+}
+
+$coverage = $testResult.CodeCoverage
+$coverage | Out-File -FilePath $coverageSummaryPath -Encoding utf8
+if ($coverage.NumberOfCommandsAnalyzed -eq 0) {
+    throw 'Pester code coverage analyzed no commands.'
+}
+
+$coveragePercent = 100 * $coverage.NumberOfCommandsExecuted / $coverage.NumberOfCommandsAnalyzed
+if ($coveragePercent -lt $minimumCoveragePercent) {
+    throw "Code coverage $coveragePercent percent is below the required $minimumCoveragePercent percent."
 }
 
 if (-not [string]::IsNullOrWhiteSpace($PsrpTarget)) {
