@@ -22,6 +22,7 @@ function Invoke-WinPushPsrpCommand {}
 function Invoke-WinPushWinRsCommand {}
 function Invoke-WinPushPsExecCommand {}
 function Remove-WinPushNativeScriptStage {}
+function New-WinPushNativePowerShellEncodedCommand {}
 
 Describe 'Invoke-WinPushRemediation' {
     BeforeEach {
@@ -361,6 +362,7 @@ Describe 'Invoke-WinPushRemediationStage' {
 
         $result.ExitCode | Should Be 3
         $script:WindowsPowerShellCommand | Should BeLike 'powershell.exe *'
+        Assert-MockCalled New-WinPushNativeStagedScriptCommand -Times 1 -ParameterFilter { $TimeoutSeconds -eq 12 }
         switch ($CommandName) {
             'Invoke-WinPushPsrpCommand' {
                 Assert-MockCalled Invoke-WinPushPsrpCommand -Times 1
@@ -383,5 +385,78 @@ Describe 'Invoke-WinPushRemediationStage' {
         Split-Path -Path $plan.RemoteDetectionScriptPath -Parent | Should Be $plan.RemoteDirectory
         Split-Path -Path $plan.RemoteRemediationScriptPath -Parent | Should Be $plan.RemoteDirectory
         $plan.RemoteDetectionScriptPath | Should Not Be $plan.RemoteRemediationScriptPath
+    }
+}
+
+Describe 'PSRP remediation timeouts' {
+    It 'stops a PSRP operation when its timeout expires' {
+        Mock Invoke-Command { Start-Job -ScriptBlock { Start-Sleep -Seconds 30 } }
+        $session = [System.Runtime.Serialization.FormatterServices]::GetUninitializedObject(
+            [System.Management.Automation.Runspaces.PSSession]
+        )
+
+        $message = $null
+        try {
+            Invoke-WinPushPsrpJob `
+                -Session $session `
+                -ScriptBlock { 'work' } `
+                -TimeoutSeconds 1 `
+                -Operation 'PSRP upload'
+        }
+        catch {
+            $message = $_.Exception.Message
+        }
+
+        $message | Should Be 'PSRP upload timed out after 1 seconds.'
+        Assert-MockCalled Invoke-Command -Times 1 -ParameterFilter { $AsJob }
+    }
+
+    It 'binds the timeout to PSRP upload and cleanup operations' {
+        $detect = Join-Path -Path $TestDrive -ChildPath 'detect.ps1'
+        $remediate = Join-Path -Path $TestDrive -ChildPath 'remediate.ps1'
+        Set-Content -LiteralPath $detect -Value 'exit 0'
+        Set-Content -LiteralPath $remediate -Value 'exit 0'
+        $plan = [pscustomobject] @{
+            RemoteDirectory             = 'C:\Windows\Temp\WinPush\one'
+            RemoteDetectionScriptPath   = 'C:\Windows\Temp\WinPush\one\detect.ps1'
+            RemoteRemediationScriptPath = 'C:\Windows\Temp\WinPush\one\remediate.ps1'
+        }
+        Mock Invoke-WinPushPsrpJob {}
+
+        Copy-WinPushRemediationScriptsToStage `
+            -Session ([pscustomobject] @{ Id = 7 }) `
+            -ComputerName 'PC-001' `
+            -DetectScriptPath $detect `
+            -RemediateScriptPath $remediate `
+            -StagePlan $plan `
+            -Transport Psrp `
+            -TimeoutSeconds 6
+        Remove-WinPushRemediationScriptStage `
+            -Session ([pscustomobject] @{ Id = 7 }) `
+            -ComputerName 'PC-001' `
+            -StagePlan $plan `
+            -Transport Psrp `
+            -TimeoutSeconds 6
+
+        Assert-MockCalled Invoke-WinPushPsrpJob -Times 3 -ParameterFilter { $TimeoutSeconds -eq 6 -and $Operation -ne 'PSRP cleanup' }
+        Assert-MockCalled Invoke-WinPushPsrpJob -Times 1 -ParameterFilter { $TimeoutSeconds -eq 6 -and $Operation -eq 'PSRP cleanup' }
+    }
+
+    It 'generates a timed process wrapper that preserves the script exit code' {
+        $script:WrapperCommand = $null
+        Mock New-WinPushNativePowerShellEncodedCommand {
+            param($Command)
+
+            $script:WrapperCommand = $Command
+            'powershell.exe encoded'
+        }
+
+        New-WinPushNativeStagedScriptCommand `
+            -RemoteScriptPath 'C:\Windows\Temp\WinPush\one\detect.ps1' `
+            -TimeoutSeconds 12 | Out-Null
+
+        $script:WrapperCommand | Should Match '\[long\] 12 \* 1000'
+        $script:WrapperCommand | Should Match 'exit 124'
+        $script:WrapperCommand | Should Match 'exit \$process\.ExitCode'
     }
 }

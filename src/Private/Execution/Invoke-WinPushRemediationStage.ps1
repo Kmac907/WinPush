@@ -21,7 +21,7 @@ function Invoke-WinPushRemediationStage {
         [int] $TimeoutSeconds = 1800
     )
 
-    $command = New-WinPushNativeStagedScriptCommand -RemoteScriptPath $RemoteScriptPath
+    $command = New-WinPushNativeStagedScriptCommand -RemoteScriptPath $RemoteScriptPath -TimeoutSeconds $TimeoutSeconds
     $result = switch ($Transport) {
         'Psrp' {
             Invoke-WinPushPsrpCommand -Session $Session -Command $command -Shell Cmd

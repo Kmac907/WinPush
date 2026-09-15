@@ -130,21 +130,36 @@ function Copy-WinPushRemediationScriptsToStage {
     )
 
     if ($Transport -eq 'Psrp') {
-        $null = Invoke-Command `
+        $null = Invoke-WinPushPsrpJob `
             -Session $Session `
-            -ScriptBlock { [System.IO.Directory]::CreateDirectory([string] $args[0]) | Out-Null } `
-            -ArgumentList $StagePlan.RemoteDirectory `
-            -ErrorAction Stop
-        Copy-WinPushPsrpItem `
-            -Session $Session `
-            -Path $DetectScriptPath `
-            -Destination $StagePlan.RemoteDetectionScriptPath `
-            -Direction Upload
-        Copy-WinPushPsrpItem `
-            -Session $Session `
-            -Path $RemediateScriptPath `
-            -Destination $StagePlan.RemoteRemediationScriptPath `
-            -Direction Upload
+            -ScriptBlock {
+                [System.IO.Directory]::CreateDirectory([string] $args[0]) | Out-Null
+                [System.IO.File]::WriteAllBytes([string] $args[1], [byte[]] @())
+                [System.IO.File]::WriteAllBytes([string] $args[2], [byte[]] @())
+            } `
+            -ArgumentList $StagePlan.RemoteDirectory, $StagePlan.RemoteDetectionScriptPath, $StagePlan.RemoteRemediationScriptPath `
+            -TimeoutSeconds $TimeoutSeconds `
+            -Operation 'PSRP staging'
+        foreach ($script in @(
+                [pscustomobject] @{ LocalPath = $DetectScriptPath; RemotePath = $StagePlan.RemoteDetectionScriptPath }
+                [pscustomobject] @{ LocalPath = $RemediateScriptPath; RemotePath = $StagePlan.RemoteRemediationScriptPath }
+            )) {
+            $bytes = [System.IO.File]::ReadAllBytes($script.LocalPath)
+            for ($offset = 0; $offset -lt $bytes.Length; $offset += 32768) {
+                $length = [System.Math]::Min(32768, $bytes.Length - $offset)
+                $chunk = [byte[]] $bytes[$offset..($offset + $length - 1)]
+                $null = Invoke-WinPushPsrpJob `
+                    -Session $Session `
+                    -ScriptBlock {
+                        $stream = [System.IO.File]::Open([string] $args[0], [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+                        try { $stream.Write([byte[]] $args[1], 0, ([byte[]] $args[1]).Length) }
+                        finally { $stream.Dispose() }
+                    } `
+                    -ArgumentList $script.RemotePath, $chunk `
+                    -TimeoutSeconds $TimeoutSeconds `
+                    -Operation 'PSRP upload'
+            }
+        }
         return
     }
 
@@ -193,7 +208,7 @@ function Remove-WinPushRemediationScriptStage {
     )
 
     if ($Transport -eq 'Psrp') {
-        $null = Invoke-Command `
+        $null = Invoke-WinPushPsrpJob `
             -Session $Session `
             -ScriptBlock {
                 if ([System.IO.Directory]::Exists([string] $args[0])) {
@@ -201,7 +216,8 @@ function Remove-WinPushRemediationScriptStage {
                 }
             } `
             -ArgumentList $StagePlan.RemoteDirectory `
-            -ErrorAction Stop
+            -TimeoutSeconds $TimeoutSeconds `
+            -Operation 'PSRP cleanup'
         return
     }
 
@@ -217,11 +233,82 @@ function New-WinPushNativeStagedScriptCommand {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string] $RemoteScriptPath
+        [string] $RemoteScriptPath,
+
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800
     )
 
-    $encodedRemoteScriptPath = ConvertTo-WinPushPowerShellSingleQuotedString -Value $RemoteScriptPath
-    New-WinPushNativePowerShellEncodedCommand -Command ('$ProgressPreference = ''SilentlyContinue''; & {{ & {0} }}' -f $encodedRemoteScriptPath)
+    if (-not $PSBoundParameters.ContainsKey('TimeoutSeconds')) {
+        $encodedRemoteScriptPath = ConvertTo-WinPushPowerShellSingleQuotedString -Value $RemoteScriptPath
+        return New-WinPushNativePowerShellEncodedCommand -Command ('$ProgressPreference = ''SilentlyContinue''; & {{ & {0} }}' -f $encodedRemoteScriptPath)
+    }
+
+    $scriptArguments = ConvertTo-WinPushPowerShellSingleQuotedString `
+        -Value ('-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}"' -f $RemoteScriptPath)
+    $command = @"
+`$ErrorActionPreference = 'Stop'
+`$startInfo = [System.Diagnostics.ProcessStartInfo]::new('powershell.exe', $scriptArguments)
+`$startInfo.UseShellExecute = `$false
+`$process = [System.Diagnostics.Process]::Start(`$startInfo)
+if ($TimeoutSeconds -eq 0) {
+    `$process.WaitForExit()
+    `$exited = `$true
+}
+else {
+    `$remainingMilliseconds = [long] $TimeoutSeconds * 1000
+    do {
+        `$waitMilliseconds = [int] [System.Math]::Min([int]::MaxValue, `$remainingMilliseconds)
+        `$exited = `$process.WaitForExit(`$waitMilliseconds)
+        `$remainingMilliseconds -= `$waitMilliseconds
+    } while (-not `$exited -and `$remainingMilliseconds -gt 0)
+}
+if (-not `$exited) {
+    `$process.Kill()
+    `$process.WaitForExit()
+    [Console]::Error.WriteLine('Process timed out after $TimeoutSeconds seconds.')
+    exit 124
+}
+exit `$process.ExitCode
+"@
+    New-WinPushNativePowerShellEncodedCommand -Command $command
+}
+
+function Invoke-WinPushPsrpJob {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object] $Session,
+
+        [Parameter(Mandatory)]
+        [scriptblock] $ScriptBlock,
+
+        [object[]] $ArgumentList = @(),
+
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800,
+
+        [string] $Operation = 'PSRP operation'
+    )
+
+    $job = Invoke-Command -Session $Session -ScriptBlock $ScriptBlock -ArgumentList $ArgumentList -AsJob -ErrorAction Stop
+    try {
+        $completedJob = if ($TimeoutSeconds -eq 0) {
+            Wait-Job -Job $job
+        }
+        else {
+            Wait-Job -Job $job -Timeout $TimeoutSeconds
+        }
+        if ($null -eq $completedJob) {
+            Stop-Job -Job $job -ErrorAction SilentlyContinue
+            throw "$Operation timed out after $TimeoutSeconds seconds."
+        }
+
+        Receive-Job -Job $job -ErrorAction Stop
+    }
+    finally {
+        Remove-Job -Job $job -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Remove-WinPushNativeScriptStage {
