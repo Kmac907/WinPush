@@ -1,6 +1,14 @@
 [CmdletBinding()]
 param(
-    [string] $ArtifactsPath
+    [string] $ArtifactsPath,
+
+    [string] $PsrpTarget,
+
+    [string] $WinRsTarget,
+
+    [string] $PsExecTarget,
+
+    [string] $PsExecPath
 )
 
 Set-StrictMode -Version Latest
@@ -13,6 +21,8 @@ $srcPath = Join-Path -Path $repoRoot -ChildPath 'src'
 $testsPath = Join-Path -Path $repoRoot -ChildPath 'tests'
 $buildPath = Join-Path -Path $repoRoot -ChildPath 'build'
 $settingsPath = Join-Path -Path $repoRoot -ChildPath 'PSScriptAnalyzerSettings.psd1'
+$smokeScriptPath = Join-Path -Path $testsPath -ChildPath 'Integration\Invoke-WinPushTransportSmoke.ps1'
+$requiredPesterVersion = [version] '3.4.0'
 
 if ([string]::IsNullOrWhiteSpace($ArtifactsPath)) {
     $ArtifactsPath = Join-Path -Path $repoRoot -ChildPath 'artifacts\build'
@@ -26,10 +36,40 @@ if ($PSVersionTable.PSEdition -ne 'Core' -or $PSVersionTable.PSVersion -lt [vers
     throw 'WinPush build requires PowerShell 7.6 Core or later.'
 }
 
-foreach ($requiredCommand in @('Test-ModuleManifest', 'Import-Module', 'Invoke-Pester', 'Invoke-ScriptAnalyzer')) {
+foreach ($requiredCommand in @('Test-ModuleManifest', 'Import-Module', 'Invoke-ScriptAnalyzer')) {
     if (-not (Get-Command -Name $requiredCommand -ErrorAction SilentlyContinue)) {
         throw "Required command '$requiredCommand' is not available. Install the required module before running the build gate."
     }
+}
+
+$availablePester = Get-Module -Name Pester -ListAvailable |
+    Where-Object { $_.Version -eq $requiredPesterVersion } |
+    Select-Object -First 1
+if ($null -eq $availablePester) {
+    throw "Required Pester version $requiredPesterVersion is not available. Install Pester $requiredPesterVersion before running the build gate."
+}
+
+$pesterModule = Import-Module -Name $availablePester.Path -Force -PassThru
+$invokePester = $pesterModule.ExportedCommands['Invoke-Pester']
+if ($null -eq $invokePester) {
+    throw "Pester $requiredPesterVersion did not export Invoke-Pester."
+}
+
+if (-not [string]::IsNullOrWhiteSpace($PsExecPath) -and [string]::IsNullOrWhiteSpace($PsExecTarget)) {
+    throw 'PsExecPath requires PsExecTarget.'
+}
+
+if (-not [string]::IsNullOrWhiteSpace($PsExecTarget)) {
+    if ([string]::IsNullOrWhiteSpace($PsExecPath)) {
+        throw 'PsExecTarget requires an explicit PsExecPath.'
+    }
+
+    $psExecItem = Get-Item -LiteralPath $PsExecPath -ErrorAction SilentlyContinue
+    if ($null -eq $psExecItem -or $psExecItem.PSIsContainer -or $psExecItem.Extension -ne '.exe') {
+        throw "PsExecPath must reference an existing .exe file: $PsExecPath"
+    }
+
+    $PsExecPath = $psExecItem.FullName
 }
 
 New-Item -Path $ArtifactsPath -ItemType Directory -Force | Out-Null
@@ -37,7 +77,6 @@ New-Item -Path $ArtifactsPath -ItemType Directory -Force | Out-Null
 Test-ModuleManifest -Path $manifestPath | Out-Null
 
 Remove-Module -Name $moduleName -Force -ErrorAction SilentlyContinue
-Import-Module -Name $manifestPath -Force
 Import-Module -Name $manifestPath -Force
 
 $analysisTargets = @($srcPath, $testsPath, $buildPath)
@@ -62,7 +101,7 @@ if ($coverageTargets) {
     $pesterParameters['CodeCoverage'] = $coverageTargets
 }
 
-$testResult = Invoke-Pester @pesterParameters
+$testResult = & $invokePester @pesterParameters
 
 if ($testResult.PSObject.Properties.Name -contains 'CodeCoverage') {
     $testResult.CodeCoverage | Out-File -FilePath $coverageSummaryPath -Encoding utf8
@@ -74,6 +113,18 @@ else {
 
 if ($testResult.FailedCount -gt 0) {
     throw "Pester reported $($testResult.FailedCount) failing test(s)."
+}
+
+if (-not [string]::IsNullOrWhiteSpace($PsrpTarget)) {
+    & $smokeScriptPath -ComputerName $PsrpTarget -Transport Psrp | Out-Null
+}
+
+if (-not [string]::IsNullOrWhiteSpace($WinRsTarget)) {
+    & $smokeScriptPath -ComputerName $WinRsTarget -Transport WinRM | Out-Null
+}
+
+if (-not [string]::IsNullOrWhiteSpace($PsExecTarget)) {
+    & $smokeScriptPath -ComputerName $PsExecTarget -Transport PsExec -PsExecPath $PsExecPath | Out-Null
 }
 
 [pscustomobject] @{
