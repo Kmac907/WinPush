@@ -35,7 +35,7 @@ function Invoke-WinPushPsrpCommand {
             if ($ShellName -eq 'Cmd') {
                 & cmd.exe /d /s /c $CommandText 2>&1 | ForEach-Object $writeRecord
             }
-            else {
+            elseif ($ShellName -eq 'PowerShell') {
                 $wrappedCommand = @"
 & {
 $CommandText
@@ -52,8 +52,11 @@ if (-not `$commandSucceeded) { exit 1 }
                 & $powerShellPath -NoLogo -NoProfile -NonInteractive -EncodedCommand $encodedCommand 2>&1 |
                     ForEach-Object $writeRecord
             }
+            else {
+                & ([scriptblock]::Create($CommandText)) 2>&1 | ForEach-Object $writeRecord
+            }
 
-            $shellExitCode = $LASTEXITCODE
+            $shellExitCode = [int] $LASTEXITCODE
             if ($ShellName -ne 'Cmd' -and $shellExitCode -eq 0 -and $state.HadErrors) {
                 $shellExitCode = 1
             }

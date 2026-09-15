@@ -48,6 +48,33 @@ function New-TestCredential {
     )
 }
 
+Describe 'Invoke-WinPushPsrpCommand' {
+    It 'runs Auto commands in the PSRP session and preserves structured output' {
+        function Invoke-Command {
+            param($Session, $ScriptBlock, $ArgumentList)
+
+            & $ScriptBlock @ArgumentList
+        }
+
+        $global:WinPushSentinel = 'present'
+
+        try {
+            $result = Invoke-WinPushPsrpCommand `
+                -Session ([pscustomobject] @{ Id = 1 }) `
+                -Shell Auto `
+                -Command '[pscustomobject]@{ Marker = $global:WinPushSentinel; Count = 2 }'
+
+            $result.ExitCode | Should Be 0
+            @($result.Output).Count | Should Be 1
+            $result.Output[0].Marker | Should Be 'present'
+            $result.Output[0].Count | Should Be 2
+        }
+        finally {
+            Remove-Variable -Name WinPushSentinel -Scope Global
+        }
+    }
+}
+
 Describe 'Invoke-WinPushCommand' {
     BeforeEach {
         $script:NewPSSessionComputerNames = @()
