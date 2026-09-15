@@ -239,6 +239,30 @@ Describe 'Export-WinPushHostFileFromEntraGroup' {
         Get-Content -Raw -LiteralPath $outputPath | Should Match '^keep-me'
     }
 
+    It 'rejects limited device objects before changing the output file' {
+        $outputPath = Join-Path -Path $TestDrive -ChildPath 'limited-device.txt'
+        Set-Content -LiteralPath $outputPath -Value 'keep-me'
+        $script:GraphContext = [pscustomobject] @{
+            Account = 'operator@contoso.com'
+            Scopes  = @('GroupMember.Read.All')
+        }
+        $script:DirectMembers = @(
+            [pscustomobject] @{
+                AdditionalProperties = @{
+                    '@odata.type'    = '#microsoft.graph.device'
+                    'id'             = 'device-id'
+                    'displayName'    = $null
+                    'accountEnabled' = $null
+                }
+            }
+        )
+
+        { Export-WinPushHostFileFromEntraGroup -GroupId 'group-id' -OutputPath $outputPath } |
+            Should Throw 'Reconnect with Device.Read.All permission.'
+
+        Get-Content -Raw -LiteralPath $outputPath | Should Match '^keep-me'
+    }
+
     It 'does not declare Microsoft Graph as a manifest dependency' {
         $manifestText = Get-Content -Raw -LiteralPath (Join-Path -Path $script:ModuleRoot -ChildPath 'WinPush.psd1')
 

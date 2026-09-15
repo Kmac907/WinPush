@@ -78,6 +78,9 @@ function Export-WinPushHostFileFromEntraGroup {
         if ($additionalProperties['@odata.type'] -ne '#microsoft.graph.device') {
             continue
         }
+        if ($null -eq $additionalProperties['displayName'] -or $null -eq $additionalProperties['accountEnabled']) {
+            throw 'Microsoft Graph returned incomplete device properties. Reconnect with Device.Read.All permission.'
+        }
 
         $displayName = [string] $additionalProperties['displayName']
         if ([string]::IsNullOrWhiteSpace($displayName)) {
