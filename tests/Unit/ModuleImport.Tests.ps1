@@ -19,7 +19,9 @@ function New-TestExecutionResult {
         [object] $PackageMetadata = $null,
         [object[]] $CopiedLogPaths = @(),
         [AllowNull()]
-        [string] $Script = $null
+        [string] $Script = $null,
+        [AllowNull()]
+        [object] $RemediationMetadata = $null
     )
 
     $result = [pscustomobject] [ordered] @{
@@ -43,9 +45,14 @@ function New-TestExecutionResult {
         Script            = $Script
     }
 
+    if ($null -ne $RemediationMetadata) {
+        $result | Add-Member -NotePropertyName RemediationMetadata -NotePropertyValue $RemediationMetadata
+    }
+
     $operationTypeName = switch ($Operation) {
         'RunCommand' { 'WinPush.ExecutionResult.RunCommand' }
         'RunScript' { 'WinPush.ExecutionResult.RunScript' }
+        'RunRemediation' { 'WinPush.ExecutionResult.RunRemediation' }
         'RunPackage' { 'WinPush.ExecutionResult.RunPackage' }
         'CopyFile' { 'WinPush.ExecutionResult.CopyFile' }
         'GetLogs' { 'WinPush.ExecutionResult.GetLogs' }
@@ -64,16 +71,25 @@ Describe 'WinPush module import foundation' {
     It 'uses an explicit manifest export list' {
         $manifest = Import-PowerShellDataFile -LiteralPath $script:ManifestPath
 
-        @($manifest.FunctionsToExport).Count | Should Be 6
-        ($manifest.FunctionsToExport -join ',') | Should Be 'Copy-WinPushItem,Get-WinPushLog,Invoke-WinPushCommand,Invoke-WinPushPackage,Invoke-WinPushScript,Test-WinPushTarget'
+        @($manifest.FunctionsToExport).Count | Should Be 10
+        ($manifest.FunctionsToExport -join ',') | Should Be 'Copy-WinPushItem,Export-WinPushHostFileFromEntraGroup,Get-WinPushLog,Get-WinPushRun,Invoke-WinPushCommand,Invoke-WinPushPackage,Invoke-WinPushRemediation,Invoke-WinPushScript,Test-WinPushRemediation,Test-WinPushTarget'
         ($manifest.FunctionsToExport -notcontains '*') | Should Be $true
         ($manifest.FunctionsToExport -contains 'Invoke-WinPushPackage') | Should Be $true
+        $manifest.ContainsKey('RequiredModules') | Should Be $false
+    }
+
+    It 'uses the same explicit export list when the root module is imported directly' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module (Join-Path -Path $script:ModuleRoot -ChildPath 'WinPush.psm1') -Force
+
+        $actual = @(Get-Command -Module WinPush -CommandType Function | Select-Object -ExpandProperty Name | Sort-Object)
+        ($actual -join ',') | Should Be 'Copy-WinPushItem,Export-WinPushHostFileFromEntraGroup,Get-WinPushLog,Get-WinPushRun,Invoke-WinPushCommand,Invoke-WinPushPackage,Invoke-WinPushRemediation,Invoke-WinPushScript,Test-WinPushRemediation,Test-WinPushTarget'
     }
 
     It 'declares the approved PowerShell runtime and edition' {
         $manifest = Import-PowerShellDataFile -LiteralPath $script:ManifestPath
 
-        $manifest.ModuleVersion | Should Be '0.1.0'
+        $manifest.ModuleVersion | Should Be '0.2.0'
         $manifest.PowerShellVersion | Should Be '7.6'
         ($manifest.CompatiblePSEditions -join ',') | Should Be 'Core'
     }
@@ -462,6 +478,77 @@ Describe 'WinPush module import foundation' {
         $formatted | Should Not Match 'Operation'
         $formatted | Should Not Match 'Details'
         $formatted | Should Not Match 'Artifacts'
+    }
+
+    It 'formats stored run results as a concise history table' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $result = [pscustomobject] [ordered] @{
+            PSTypeName      = 'WinPush.RunResult'
+            ComputerName    = 'PC06'
+            Operation       = 'RunCommand'
+            Succeeded       = $true
+            ExitCode        = 0
+            TargetLogExists = $true
+            TargetLogPath   = 'C:\WinPush\run\PC06\run.log'
+            RunDirectory    = 'C:\WinPush\run'
+        }
+        $formatted = $result | Out-String -Width 220
+
+        $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Operation'
+        $formatted | Should Match 'Status'
+        $formatted | Should Match 'TargetLog'
+        $formatted | Should Match 'Available'
+        $formatted | Should Not Match 'TargetLogPath'
+        $formatted | Should Not Match 'RunDirectory'
+    }
+
+    It 'formats remediation validation results as concise diagnostic counts' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $result = [pscustomobject] [ordered] @{
+            PSTypeName          = 'WinPush.RemediationValidationResult'
+            IsValid             = $true
+            DetectScriptPath    = 'C:\Scripts\detect.ps1'
+            RemediateScriptPath = 'C:\Scripts\remediate.ps1'
+            Errors              = @()
+            Warnings            = @('review reboot behavior')
+        }
+        $formatted = $result | Out-String -Width 220
+
+        $formatted | Should Match 'Valid'
+        $formatted | Should Match 'Errors'
+        $formatted | Should Match 'Warnings'
+        $formatted | Should Match 'detect.ps1'
+        $formatted | Should Match 'remediate.ps1'
+        $formatted | Should Not Match 'review reboot behavior'
+    }
+
+    It 'formats remediation execution results as a concise phase table' {
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        $metadata = [pscustomobject] @{
+            Status              = 'Remediated'
+            DetectionExitCode   = 1
+            RemediationExitCode = 0
+            DetectionOutput     = @('not compliant')
+            RemediationOutput   = @('fixed')
+        }
+        $result = New-TestExecutionResult -ComputerName 'PC07' -Operation 'RunRemediation' -RemediationMetadata $metadata
+        $formatted = $result | Out-String -Width 220
+
+        $formatted | Should Match 'ComputerName'
+        $formatted | Should Match 'Transport'
+        $formatted | Should Match 'Status'
+        $formatted | Should Match 'DetectExit'
+        $formatted | Should Match 'RemediateExit'
+        $formatted | Should Match 'Remediated'
+        $formatted | Should Not Match 'DetectionOutput'
+        $formatted | Should Not Match 'not compliant'
     }
 
     It 'keeps transport implementation out of the root module' {

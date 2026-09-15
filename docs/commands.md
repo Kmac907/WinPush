@@ -10,10 +10,14 @@
 | `Copy-WinPushItem` | Uploads one existing local file to one target through `Copy-Item -ToSession`, or downloads one remote file through `Copy-Item -FromSession` when `-Direction Download` is supplied. |
 | `Get-WinPushLog` | Copies immediate regular files from one explicit absolute remote Windows directory to the target's local `Logs` folder under a timestamped output run folder. |
 | `Invoke-WinPushPackage` | Stages a local or cached URI package through PSRP, runs one package-relative `.ps1` entry point, and can capture output, copy logs, and clean remote staging. |
+| `Get-WinPushRun` | Reads and types the rows in a captured run's `summary.csv`, preserving order and mapping safe target log paths. |
+| `Test-WinPushRemediation` | Parses a detection/remediation script pair with Windows PowerShell 5.1 and reports errors and warnings without execution. |
+| `Invoke-WinPushRemediation` | Validates, stages, and runs a detection/remediation pair through PSRP, WinRS, or PsExec. |
+| `Export-WinPushHostFileFromEntraGroup` | Writes unique Entra device display names from direct or transitive group membership to a host file. |
 
 ## Default Output
 
-All public commands return structured `WinPush.ExecutionResult` objects. The default terminal view is operation-specific and compact:
+Remote execution and transfer commands return structured `WinPush.ExecutionResult` objects. Run history and remediation validation have their own typed results; Entra export emits names only with `-PassThru`. The default terminal views are compact:
 
 ```text
 Invoke-WinPushCommand
@@ -48,9 +52,24 @@ Test-WinPushTarget
 ComputerName Reachable Transport ErrorSummary
 ------------ --------- --------- ------------
 PC01         True      Psrp
+
+Get-WinPushRun
+ComputerName Operation      Status ExitCode TargetLog
+------------ ---------      ------ -------- ---------
+PC01         RunCommand     OK     0        Available
+
+Test-WinPushRemediation
+Valid Errors Warnings DetectScript RemediateScript
+----- ------ --------  ------------ -----------------
+True  0      0         detect.ps1   remediate.ps1
+
+Invoke-WinPushRemediation
+ComputerName Transport Status     DetectExit RemediateExit ErrorSummary
+------------ --------- ------     ---------- ------------- ------------
+PC01         Psrp      Remediated 1          0
 ```
 
-`OutputPreview`, raw multiline output, and artifact paths are not shown by default. Every command summary includes `Transport`. `Invoke-WinPushCommand` includes `OutputSummary`, a short first-value command-output summary. Successful rows leave `ErrorSummary` blank; failed rows show a short normalized summary. Full output, full errors, logs, metadata, and artifact paths remain on the returned object and are visible with property access or `Format-List *`. `-CaptureOutput` writes detailed command, script, or package output to the root correlated `run.log` and each per-target `run.log`.
+`OutputPreview`, raw multiline output, and artifact paths are not shown by default. Every execution summary includes `Transport`. `Invoke-WinPushCommand` includes `OutputSummary`, a short first-value command-output summary. Successful rows leave `ErrorSummary` blank; failed rows show a short normalized summary. Full output, full errors, logs, metadata, and artifact paths remain on the returned object and are visible with property access or `Format-List *`. `-CaptureOutput` writes detailed command, script, package, or remediation output to the root correlated `run.log` and each per-target `run.log`.
 
 ## Parameters
 
@@ -74,6 +93,8 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 | `-HostFile` | `string` | UTF-8 file containing target names. |
 | `-Command` | `string` | Command text. Required. PSRP treats this as PowerShell source; native transports use native command text. |
 | `-Transport` | `Psrp`, `WinRM`, `PsExec` | Optional. Defaults to `Psrp`. |
+| `-Shell` | `Auto`, `PowerShell`, `Cmd` | Command shell. `Auto` preserves the transport default; `PowerShell` forces PowerShell and `Cmd` forces `cmd.exe`. |
+| `-TimeoutSeconds` | `int` | Native WinRS/PsExec timeout. Defaults to 1800; `0` disables the timeout. A timeout kills the process tree and returns exit code `124`. |
 | `-PsExecPath` | `string` | Optional path to `PsExec.exe`; only valid with `-Transport PsExec`. |
 | `-Credential` | `PSCredential` | Optional PSRP credential. Not supported with `WinRM` or `PsExec`. |
 | `-CaptureOutput` | switch | Writes one run-level `summary.csv`, one root correlated `run.log`, and one per-target `run.log`. Supported with every transport. |
@@ -90,6 +111,7 @@ Target input is required from either `-ComputerName`, pipeline input, or `-HostF
 | `-HostFile` | `string` | UTF-8 file containing target names. |
 | `-ScriptPath` | `string` | Existing local `.ps1` file. Required. |
 | `-Transport` | `Psrp`, `WinRM`, `PsExec` | Optional. Defaults to `Psrp`. |
+| `-TimeoutSeconds` | `int` | Native WinRS/PsExec staging and execution timeout. Defaults to 1800; `0` disables the timeout. |
 | `-PsExecPath` | `string` | Optional path to `PsExec.exe`; only valid with `-Transport PsExec`. |
 | `-Credential` | `PSCredential` | Optional PSRP credential. Not supported with `WinRM` or `PsExec`. |
 | `-CaptureOutput` | switch | Writes one run-level `summary.csv`, one root correlated `run.log`, and one per-target `run.log`. Supported with every transport. |
@@ -132,18 +154,69 @@ Package support stages one existing local package file or directory to resolved 
 | `-ComputerName` | `string[]` | Target names. Also accepts pipeline strings and pipeline objects with a `ComputerName` property. |
 | `-HostFile` | `string` | UTF-8 file containing target names. Blank lines and full-line `#` comments are ignored, and duplicate targets are removed case-insensitively. |
 | `-Path` | `string` | Existing local admin-workstation package file or directory. Mutually exclusive with `-Uri`. |
-| `-Uri` | `uri` | Absolute remote package source downloaded to the admin-workstation cache before endpoint staging. Mutually exclusive with `-Path`. |
+| `-Uri` | `uri` | Absolute HTTPS package source downloaded to a temporary admin-workstation cache before endpoint staging. Mutually exclusive with `-Path`. |
 | `-EntryPoint` | `string` | PowerShell `.ps1` package entry point relative to the staged package root. Required. |
+| `-ArgumentList` | `object[]` | Positional values passed to the package entry point. Defaults to an empty array. |
+| `-ExpectedSha256` | `string` | Optional 64-hex-character SHA-256 expected for a URI download. A mismatch stops before endpoint sessions are opened. |
 | `-Extract` | switch | Extracts staged `.zip` package files on the endpoint into the package staging directory. Non-zip files and directory packages are rejected. |
 | `-CaptureOutput` | switch | Writes one run-level `summary.csv`, one root correlated `run.log`, and one per-target `run.log` for package output and errors. |
 | `-Logs` | switch | Copies immediate regular files from `C:\ProgramData\EA\Logs\<entry-point-name>\`, where `<entry-point-name>` is the package entry point base name. |
 | `-Cleanup` | `Never`, `OnSuccess`, `Always` | Remote staged-package cleanup policy. Defaults to `Never`; `OnSuccess` removes staged files after successful package execution, and `Always` removes staged files after success or failure when a stage exists. |
 | `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
-| `-PackageCacheRoot` | `string` | Local admin-workstation URI package cache root. Defaults to `C:\WinPush\PackageCache`. |
-| `-RemoteStageRoot` | `string` | Remote endpoint staging root. Defaults to `C:\ProgramData\WinPush\Staging`. |
+| `-PackageCacheRoot` | `string` | Parent for the temporary per-run URI cache. Defaults to `C:\WinPush\PackageCache`; the created cache directory is removed in `finally`. |
+| `-RemoteStageRoot` | `string` | Absolute drive-rooted or UNC endpoint staging root. Defaults to `C:\ProgramData\WinPush\Staging`. |
 | `-Credential` | `PSCredential` | Optional PSRP credential. Uses the current identity when omitted. |
 
-Package staging, extraction, execution, artifact capture, and log copy support resolved direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, and `-HostFile` targets. `-Path` and `-Uri` are mutually exclusive. URI packages are downloaded once by the admin workstation before the cached file is uploaded to each endpoint through PSRP. `-EntryPoint` must be a package-relative `.ps1` path; rooted paths, parent traversal, empty path segments, and non-PowerShell entry points are rejected before execution.
+Package staging, extraction, execution, artifact capture, and log copy support resolved direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, and `-HostFile` targets. `-Path` and `-Uri` are mutually exclusive. URI packages are downloaded once by the admin workstation before the cached file is uploaded to each endpoint through PSRP. `-EntryPoint` must be a package-relative `.ps1` path; rooted paths, parent traversal, empty path segments, and non-PowerShell entry points are rejected before execution. `-ArgumentList` is positional: values bind in the entry point's declared parameter order.
+
+### `Get-WinPushRun`
+
+| Parameter | Argument | Notes |
+| --- | --- | --- |
+| `-Path` | `string` | Existing captured run directory containing `summary.csv`. Required. |
+
+Each CSV row becomes a `WinPush.RunResult`. `Succeeded` is restored to `bool`, `ExitCode` to `int` or `$null`, and the original row fields are retained. `RunDirectory`, `TargetLogPath`, and `TargetLogExists` are added. The target log path uses the same safe target-directory mapping as capture, not the raw target name.
+
+### `Test-WinPushRemediation`
+
+| Parameter | Argument | Notes |
+| --- | --- | --- |
+| `-DetectScript` | `string` | Existing local `.ps1` detection script. Required. |
+| `-RemediateScript` | `string` | Existing local `.ps1` remediation script. Required. |
+
+The command returns `WinPush.RemediationValidationResult` with `IsValid`, resolved paths, `Errors`, and `Warnings`. Both scripts are parsed by Windows PowerShell 5.1 without execution. Missing literal `exit 0`/`exit 1` detection paths and reboot commands are warnings; file and parser failures are errors.
+
+### `Invoke-WinPushRemediation`
+
+| Parameter | Argument | Notes |
+| --- | --- | --- |
+| `-ComputerName` | `string[]` | Target names; accepts pipeline strings and `ComputerName` properties. |
+| `-HostFile` | `string` | UTF-8 file containing target names. |
+| `-DetectScript` | `string` | Local detection `.ps1`; exit `0` means compliant and `1` requests remediation. |
+| `-RemediateScript` | `string` | Local remediation `.ps1`; exit `0` means remediated. |
+| `-Transport` | `Psrp`, `WinRM`, `PsExec` | Defaults to `Psrp`. |
+| `-TimeoutSeconds` | `int` | Native stage/phase timeout. Defaults to 1800; `0` disables it. |
+| `-PsExecPath` | `string` | Optional `PsExec.exe` path, valid only for PsExec. |
+| `-Credential` | `PSCredential` | Optional for PSRP; unsupported for native transports. |
+| `-CaptureOutput` | switch | Writes gradual root/per-target logs and `summary.csv`. |
+| `-Logs` | switch | Copies detect/remediate convention logs through PSRP; unsupported for native transports. |
+| `-OutputRoot` | `string` | Local artifact root. Defaults to `C:\WinPush`. |
+
+Results have `Operation = RunRemediation` and `RemediationMetadata` with `Status` (`Compliant`, `Remediated`, or `Failed`), separate exit codes, output, and errors for both phases. Scripts are always validated first and staged files are removed after execution.
+
+### `Export-WinPushHostFileFromEntraGroup`
+
+| Parameter | Argument | Notes |
+| --- | --- | --- |
+| `-GroupId` | `string` | Entra group ID; mutually exclusive with `-GroupName`. |
+| `-GroupName` | `string` | Exact group display name; fails when missing or ambiguous. |
+| `-OutputPath` | `string` | Host file to write. Required. |
+| `-IncludeDisabled` | switch | Includes disabled devices; omitted by default. |
+| `-Append` | switch | Appends only device names not already present, case-insensitively. |
+| `-PassThru` | switch | Returns only names written by this invocation. |
+| `-Transitive` | switch | Uses flattened transitive membership instead of direct membership. |
+
+This command uses an existing authenticated Microsoft Graph context and the installed `Get-MgContext`, `Get-MgGroupMember`/`Get-MgGroupTransitiveMember`, and, for names, `Get-MgGroup` commands. Microsoft Graph is optional and is not declared as a WinPush manifest dependency.
 
 ## Target Input
 
@@ -160,7 +233,7 @@ Avoid:
 
 ## Transport Notes
 
-PSRP command text is PowerShell source. Explicit command-shell invocations such as `cmd.exe /d /s /c "echo winpush"` are accepted as caller-supplied PowerShell command text; WinPush does not add automatic `cmd.exe` wrapping for PSRP.
+`Invoke-WinPushCommand -Shell Auto` preserves each transport's default: PowerShell for PSRP, raw WinRS command text, and `cmd.exe` for PsExec. `-Shell PowerShell` forces encoded PowerShell, while `-Shell Cmd` explicitly runs `cmd.exe /d /s /c`. Native processes are terminated with their process tree when `-TimeoutSeconds` expires and return exit code `124`.
 
 WinRM transport launches `winrs.exe` once per resolved target. It keeps native standard output text in `Output`, native standard error text in `Errors`, and sets `ExitCode` to the native process exit code.
 
@@ -180,7 +253,15 @@ Native script transports copy the local `.ps1` file to `C:\Windows\Temp\WinPush\
 
 `Invoke-WinPushPackage -Logs` copies immediate regular files from `C:\ProgramData\EA\Logs\<entry-point-name>\`, where `<entry-point-name>` is the package entry point base name.
 
-Attached command, script, and package logs reuse the same PSSession, run after the primary execution attempt, populate `Logs` and `CopiedLogPaths`, and do not change the primary command, script, or package success state.
+Attached command, script, package, and remediation logs reuse the same PSSession, run after the primary execution attempt, populate `Logs` and `CopiedLogPaths`, and do not change the primary execution state.
+
+## Capture And Artifact Safety
+
+Captured runs use `<OutputRoot>\<dd-MM-yyyy-HHmmss>-<GUID>\`, preventing same-second controller runs from sharing files. Root and per-target `run.log` files are created before execution and receive stage, output, and error records gradually rather than only at completion.
+
+Target names that are unsafe as a Windows directory component are sanitized and receive an eight-character SHA-256 suffix. This prevents traversal, reserved-name, separator, and IPv6 filename problems while preserving the original `ComputerName` in results and CSV rows. `Get-WinPushRun` applies the same mapping.
+
+Local artifact failures populate `ArtifactError`; they do not overwrite the primary remote `Succeeded`, `ExitCode`, `Output`, or `Errors`. Full in-memory results remain available when capture cannot continue.
 
 ## Error Handling
 
@@ -194,6 +275,8 @@ The module fails or returns failed per-target results when:
 - remote log directories are empty, non-absolute, missing, inaccessible, or not directories
 - PSRP session creation fails
 - remote command or script execution returns errors
+- remediation validation or execution fails
+- URI packages use a non-HTTPS URI or fail an optional expected SHA-256 check
 - file transfer or log copy fails
 
 Recoverable conditions:
@@ -217,5 +300,6 @@ Command and script behavior is determined by caller-supplied command text or scr
 - Automatic WinRM, firewall, TrustedHosts, certificate, endpoint, or policy configuration is not implemented.
 - Recursive file transfer, recursive log enumeration, and multi-target file transfer are not implemented.
 - Script arguments are not implemented for `Invoke-WinPushScript`.
+- Package signature enforcement and mandatory checksums are not implemented; `ExpectedSha256` is optional.
 - Native script transports stage script content through the selected native transport and do not support `-Credential` or `-Logs`.
 - `Copy-WinPushItem` supports one target and one file per call.

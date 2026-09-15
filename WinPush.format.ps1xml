@@ -171,5 +171,85 @@
         </TableRowEntries>
       </TableControl>
     </View>
+    <View>
+      <Name>WinPush.RunResult.Status</Name>
+      <ViewSelectedBy>
+        <TypeName>WinPush.RunResult</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>ComputerName</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Operation</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ExitCode</Label></TableColumnHeader>
+          <TableColumnHeader><Label>TargetLog</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>ComputerName</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Operation</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($_.Succeeded) { 'OK' } else { 'Failed' }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><PropertyName>ExitCode</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($_.TargetLogExists) { 'Available' } else { 'Missing' }</ScriptBlock></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>WinPush.RemediationValidationResult.Status</Name>
+      <ViewSelectedBy>
+        <TypeName>WinPush.RemediationValidationResult</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>Valid</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Errors</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Warnings</Label></TableColumnHeader>
+          <TableColumnHeader><Label>DetectScript</Label></TableColumnHeader>
+          <TableColumnHeader><Label>RemediateScript</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>IsValid</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>@($_.Errors).Count</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>@($_.Warnings).Count</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if (-not [string]::IsNullOrWhiteSpace($_.DetectScriptPath)) { [System.IO.Path]::GetFileName($_.DetectScriptPath) }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if (-not [string]::IsNullOrWhiteSpace($_.RemediateScriptPath)) { [System.IO.Path]::GetFileName($_.RemediateScriptPath) }</ScriptBlock></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
+    <View>
+      <Name>WinPush.ExecutionResult.RunRemediation.Status</Name>
+      <ViewSelectedBy>
+        <TypeName>WinPush.ExecutionResult.RunRemediation</TypeName>
+      </ViewSelectedBy>
+      <TableControl>
+        <TableHeaders>
+          <TableColumnHeader><Label>ComputerName</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Transport</Label></TableColumnHeader>
+          <TableColumnHeader><Label>Status</Label></TableColumnHeader>
+          <TableColumnHeader><Label>DetectExit</Label></TableColumnHeader>
+          <TableColumnHeader><Label>RemediateExit</Label></TableColumnHeader>
+          <TableColumnHeader><Label>ErrorSummary</Label></TableColumnHeader>
+        </TableHeaders>
+        <TableRowEntries>
+          <TableRowEntry>
+            <TableColumnItems>
+              <TableColumnItem><PropertyName>ComputerName</PropertyName></TableColumnItem>
+              <TableColumnItem><PropertyName>Transport</PropertyName></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($null -ne $_.RemediationMetadata) { $_.RemediationMetadata.Status } elseif ($_.Succeeded) { 'OK' } else { 'Failed' }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($null -ne $_.RemediationMetadata) { $_.RemediationMetadata.DetectionExitCode }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if ($null -ne $_.RemediationMetadata) { $_.RemediationMetadata.RemediationExitCode }</ScriptBlock></TableColumnItem>
+              <TableColumnItem><ScriptBlock>if (-not $_.Succeeded) { $message = if (-not [string]::IsNullOrWhiteSpace($_.ErrorMessage)) { [string] $_.ErrorMessage } elseif (@($_.Errors).Count -gt 0) { [string] @($_.Errors)[0] } else { $null }; if (-not [string]::IsNullOrWhiteSpace($message)) { $summary = $message -replace '\s+', ' '; if ($summary.Length -gt 72) { $summary.Substring(0, 69) + '...' } else { $summary } } }</ScriptBlock></TableColumnItem>
+            </TableColumnItems>
+          </TableRowEntry>
+        </TableRowEntries>
+      </TableControl>
+    </View>
   </ViewDefinitions>
 </Configuration>

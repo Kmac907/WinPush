@@ -67,7 +67,7 @@ Additional cleanup:
 
 ## Package Workflow
 
-`Invoke-WinPushPackage` stages one existing local package file or directory from the admin workstation to resolved direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP. It creates one remote staging directory per target under `C:\ProgramData\WinPush\Staging\<run-id>\`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It can also download one absolute URI package to the admin-workstation cache, then upload the cached package file to each resolved target through PSRP. When `-Extract` is supplied with a staged `.zip` package, each endpoint extracts the archive into its package staging directory and returns `PackageMetadata.Extracted = True`. The command sets the remote working directory to the staged or extracted package root and runs one package-relative PowerShell `.ps1` entry point per target. When `-CaptureOutput` is supplied, package entry-point output and errors are written to the same local artifact shape as command and script execution: one shared run-level `summary.csv`, one root correlated `run.log`, and one per-target `run.log`. When `-Logs` is supplied, immediate regular files are copied from `C:\ProgramData\EA\Logs\<entry-point-name>\` to the local target `Logs` folder. When `-Cleanup OnSuccess` or `-Cleanup Always` is supplied, the generated remote stage directory is removed after optional log collection. It returns one `WinPush.ExecutionResult` with `Operation = RunPackage` per resolved target.
+`Invoke-WinPushPackage` stages one existing local package file or directory from the admin workstation to resolved direct `-ComputerName`, pipeline string, pipeline-by-property-name `ComputerName`, or `-HostFile` targets through PSRP. It creates one remote staging directory per target under the absolute `RemoteStageRoot`, uploads the local package file into that directory, or recursively uploads local directory contents beneath that remote package root while preserving relative file layout. It can also download one absolute HTTPS URI into a temporary admin-workstation cache, optionally verify `ExpectedSha256`, then upload the cached file through PSRP. The temporary cache directory is removed after success or failure. When `-Extract` is supplied with a staged `.zip`, each endpoint extracts it and returns `PackageMetadata.Extracted = True`. The command runs one package-relative PowerShell `.ps1` entry point with optional positional `ArgumentList`. Capture, log copy, and remote cleanup behave as described below. It returns one `WinPush.ExecutionResult` with `Operation = RunPackage` per resolved target.
 
 Live package workflow validation is covered by the integration harness in `tests/Integration/Invoke-WinPushPackageLiveValidation.ps1`.
 
@@ -77,7 +77,7 @@ Package workflow results carry `PackageMetadata` on the returned `WinPush.Execut
 | --- | --- |
 | `PackageSourceType` | `Path` or `Uri`. |
 | `PackageSource` | Original local path or URI supplied by the operator. |
-| `LocalPackagePath` | Local package path used by the admin workstation. URI packages use the downloaded cache path. |
+| `LocalPackagePath` | Local package path used by the admin workstation. For URI packages this records the temporary cache path, which is removed when the command finishes. |
 | `RemoteStagePath` | Endpoint staging path for the package or staged package root. |
 | `EntryPoint` | Package-relative PowerShell entry point. |
 | `Extracted` | Whether endpoint extraction was performed successfully. |
@@ -125,6 +125,21 @@ Invoke-WinPushPackage `
     -EntryPoint .\Install-EA.ps1 `
     -Extract
 ```
+
+Pin a URI package by SHA-256 and pass entry-point parameters by position:
+
+```powershell
+Invoke-WinPushPackage `
+    -ComputerName PC01 `
+    -Uri 'https://storage.blob.core.windows.net/packages/EA.zip' `
+    -ExpectedSha256 '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' `
+    -EntryPoint .\Install-EA.ps1 `
+    -ArgumentList @('Production', $true) `
+    -RemoteStageRoot 'C:\ProgramData\WinPush\Staging' `
+    -Extract
+```
+
+`ArgumentList` values bind to the entry point's declared parameters in order. `RemoteStageRoot` must be an absolute drive-rooted or UNC Windows path; relative paths and device namespaces are rejected before remote work starts.
 
 Package workflow with captured output artifacts:
 
@@ -189,18 +204,17 @@ Parameters:
 | `ResultPath` | Timestamped JSON under `.\artifacts\validation` | Machine-readable validation result. |
 | `PackageCacheRoot` | Temporary folder | URI package download cache used by `Invoke-WinPushPackage`; removed by the harness. |
 | `RemoteStageRoot` | `C:\ProgramData\WinPush\Staging` | Remote package staging root to validate and clean. |
-| `HttpPort` | Auto-selected loopback port | Local ephemeral HTTP server port for the disposable URI package source. |
 
-When PSRP authentication works, the harness creates disposable local file, directory, zip, and loopback URI package sources, runs `Invoke-WinPushPackage` through PSRP, validates package output capture, immediate-file log copy from `C:\ProgramData\EA\Logs\<entry-point-name>`, `Cleanup Never`, `Cleanup OnSuccess`, `Cleanup Always`, representative entry-point failure, remote stage cleanup, and local PSSession count stability. It removes local scratch package sources, the temporary URI cache, retained remote package stages, and validation log directories it creates. Generated JSON and captured validation artifacts live under ignored `artifacts/`.
+When PSRP authentication works, the harness creates disposable local file, directory, and zip package sources, runs `Invoke-WinPushPackage` through PSRP, validates package output capture, immediate-file log copy from `C:\ProgramData\EA\Logs\<entry-point-name>`, `Cleanup Never`, `Cleanup OnSuccess`, `Cleanup Always`, representative entry-point failure, remote stage cleanup, and local PSSession count stability. It removes local scratch package sources, the temporary cache root, retained remote package stages, and validation log directories it creates. Generated JSON and captured validation artifacts live under ignored `artifacts/`.
 
 Defaults:
 
-- URI packages download to `C:\WinPush\PackageCache\<run-timestamp>\` on the admin workstation before endpoint staging.
-- Endpoint staging uses `C:\ProgramData\WinPush\Staging\<run-id>\`.
+- URI packages must use HTTPS and download to a timestamp/GUID cache directory under `C:\WinPush\PackageCache\`; that temporary directory is removed in `finally`.
+- Endpoint staging uses an absolute `C:\ProgramData\WinPush\Staging\<run-id>\` path by default.
 - Cleanup defaults to `Never`.
 - Initial entry points are PowerShell `.ps1` files only.
 - Endpoints do not download package URIs directly.
-- Package workflow does not include package integrity switches, native `.exe` or `.cmd` entry points, package manifests, retries, parallel execution, or recursive log copy beyond the approved log behavior.
+- `ExpectedSha256` is optional; mandatory hash or signature policy, native `.exe` or `.cmd` entry points, package manifests, retries, parallel execution, and recursive log copy remain deferred.
 
 Package rules:
 
@@ -212,5 +226,10 @@ Package rules:
 - `-CaptureOutput` writes one shared run-level `summary.csv`, one root correlated `run.log`, and one per-target `run.log` for returned package results.
 - `-Logs` copies convention-based package logs from `C:\ProgramData\EA\Logs\<entry-point-name>\` to the local target `Logs` folder.
 - URI packages are downloaded only by the admin workstation, then uploaded to endpoints through PSRP.
+- URI cache cleanup is automatic even when validation, staging, or execution fails.
 - `-Cleanup OnSuccess` and `-Cleanup Always` remove only generated stage directories under the configured remote staging root.
 - Direct `-ComputerName` arrays, pipeline strings, pipeline objects with a `ComputerName` property, and `-HostFile` targets are supported for package workflows.
+
+## 0.1.0 To 0.2.0 Package Migration
+
+This pre-1.0 release tightens the package contract. HTTP URIs no longer work; use HTTPS. `ExpectedSha256` now provides optional content pinning, but is not a mandatory integrity policy. Per-invocation URI cache directories are temporary instead of retained. `RemoteStageRoot` must be absolute, and entry-point parameters are passed with positional `ArgumentList`. Captured run folders now use timestamp/GUID names and safe hashed target-directory components rather than assuming raw target names are valid paths.

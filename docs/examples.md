@@ -77,6 +77,17 @@ Invoke-WinPushCommand `
     -Transport WinRM
 ```
 
+Choose `cmd.exe` explicitly and bound native execution time:
+
+```powershell
+Invoke-WinPushCommand `
+    -ComputerName $ComputerName `
+    -Command 'ver' `
+    -Transport WinRM `
+    -Shell Cmd `
+    -TimeoutSeconds 120
+```
+
 Run command text through WinRS and capture output artifacts:
 
 ```powershell
@@ -270,6 +281,22 @@ Invoke-WinPushPackage `
     -OutputRoot $OutputRoot
 ```
 
+Download only over HTTPS, verify the optional SHA-256, pass positional entry-point arguments, and use an absolute remote stage root:
+
+```powershell
+Invoke-WinPushPackage `
+    -ComputerName $ComputerName `
+    -Uri 'https://packages.example.test/EAInstallPackage.zip' `
+    -ExpectedSha256 '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' `
+    -EntryPoint .\Install-EA.ps1 `
+    -ArgumentList @('Production', $true) `
+    -RemoteStageRoot 'C:\ProgramData\WinPush\Staging' `
+    -Extract `
+    -Cleanup Always
+```
+
+The per-invocation URI cache directory beneath `PackageCacheRoot` is temporary and is removed after success or failure.
+
 Run the same package through PSRP across a host file:
 
 ```powershell
@@ -281,3 +308,55 @@ Invoke-WinPushPackage `
     -Cleanup OnSuccess `
     -OutputRoot $OutputRoot
 ```
+
+## Run History
+
+Read `summary.csv` back from a captured run and locate available per-target logs:
+
+```powershell
+$Results = Invoke-WinPushCommand `
+    -ComputerName @('PC01', 'fe80::1') `
+    -Command 'hostname' `
+    -CaptureOutput `
+    -OutputRoot $OutputRoot
+
+Get-WinPushRun -Path $Results[0].RunDirectory
+```
+
+The run directory name contains a timestamp and GUID. Unsafe target names are mapped to safe hashed directory names; use `TargetLogPath` instead of constructing a raw target path.
+
+## Remediation
+
+Validate with the Windows PowerShell 5.1 parser, then invoke detection and remediation:
+
+```powershell
+$Validation = Test-WinPushRemediation `
+    -DetectScript .\Detect-EA.ps1 `
+    -RemediateScript .\Repair-EA.ps1
+
+if ($Validation.IsValid) {
+    Invoke-WinPushRemediation `
+        -ComputerName $ComputerName `
+        -DetectScript $Validation.DetectScriptPath `
+        -RemediateScript $Validation.RemediateScriptPath `
+        -TimeoutSeconds 300 `
+        -CaptureOutput `
+        -OutputRoot $OutputRoot
+}
+```
+
+Detection exit `0` returns `Compliant`; exit `1` runs remediation, whose exit `0` returns `Remediated`. Phase details are retained in `RemediationMetadata`.
+
+## Entra Host Export
+
+Install Microsoft Graph separately, authenticate, and export enabled direct device members:
+
+```powershell
+Connect-MgGraph
+
+Export-WinPushHostFileFromEntraGroup `
+    -GroupName 'Windows Pilot Devices' `
+    -OutputPath .\hosts.txt
+```
+
+Use `-Transitive` for flattened membership, `-IncludeDisabled` when needed, or `-Append -PassThru` to add and return only new names. WinPush does not declare Microsoft Graph as a required dependency.
