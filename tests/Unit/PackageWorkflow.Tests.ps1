@@ -7,6 +7,7 @@ $script:PackageInfoPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Pri
 $script:PsrpCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Copy-WinPushPsrpItem.ps1'
 $script:PackageStagePath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\New-WinPushPackageStagePlan.ps1'
 $script:ArtifactWriterPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
+$script:CaptureContextPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\New-WinPushCaptureContext.ps1'
 $script:ScriptLogDirectoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\Get-WinPushScriptLogDirectory.ps1'
 $script:LogArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\New-WinPushLogArtifactDirectory.ps1'
 $script:PsrpLogCopyPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Logs\Copy-WinPushPsrpLogDirectory.ps1'
@@ -19,6 +20,7 @@ $script:PackageCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\
 . $script:PackageInfoPath
 . $script:PsrpCopyPath
 . $script:PackageStagePath
+. $script:CaptureContextPath
 . $script:ArtifactWriterPath
 . $script:ScriptLogDirectoryPath
 . $script:LogArtifactPath

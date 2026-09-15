@@ -20,12 +20,20 @@ function Invoke-WinPushPsrpCommand {
             [string] $ShellName
         )
 
-        $output = [System.Collections.Generic.List[object]]::new()
-        $errors = [System.Collections.Generic.List[string]]::new()
+        $state = [pscustomobject] @{ HadErrors = $false }
+        $writeRecord = {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                $state.HadErrors = $true
+                [pscustomobject] @{ Type = 'Error'; Value = [string] $_ }
+            }
+            else {
+                [pscustomobject] @{ Type = 'Output'; Value = $_ }
+            }
+        }
 
         try {
-            $streamItems = if ($ShellName -eq 'Cmd') {
-                & cmd.exe /d /s /c $CommandText 2>&1
+            if ($ShellName -eq 'Cmd') {
+                & cmd.exe /d /s /c $CommandText 2>&1 | ForEach-Object $writeRecord
             }
             else {
                 $wrappedCommand = @"
@@ -41,45 +49,56 @@ if (-not `$commandSucceeded) { exit 1 }
                 )
                 $powerShellExecutable = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
                 $powerShellPath = Join-Path -Path $PSHOME -ChildPath $powerShellExecutable
-                & $powerShellPath -NoLogo -NoProfile -NonInteractive -EncodedCommand $encodedCommand 2>&1
+                & $powerShellPath -NoLogo -NoProfile -NonInteractive -EncodedCommand $encodedCommand 2>&1 |
+                    ForEach-Object $writeRecord
             }
 
             $shellExitCode = $LASTEXITCODE
-            $streamItems | ForEach-Object {
-                if ($_ -is [System.Management.Automation.ErrorRecord]) {
-                    $errors.Add([string] $_)
-                }
-                else {
-                    $output.Add($_)
-                }
-            }
-
-            if ($ShellName -ne 'Cmd' -and $shellExitCode -eq 0 -and $errors.Count -gt 0) {
+            if ($ShellName -ne 'Cmd' -and $shellExitCode -eq 0 -and $state.HadErrors) {
                 $shellExitCode = 1
             }
         }
         catch {
-            $errors.Add([string] $_)
+            [pscustomobject] @{ Type = 'Error'; Value = [string] $_ }
             $shellExitCode = 1
         }
 
-        [pscustomobject] [ordered] @{
-            Output   = $output.ToArray()
-            Errors   = $errors.ToArray()
-            ExitCode = $shellExitCode
-        }
+        [pscustomobject] @{ Type = 'Completed'; Value = $shellExitCode }
     }
 
-    $remoteResult = @(Invoke-Command `
+    $output = [System.Collections.Generic.List[object]]::new()
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $state = [pscustomobject] @{ ExitCode = 1 }
+    $activeCaptureContext = if (Get-Command -Name Get-WinPushActiveCaptureContext -ErrorAction SilentlyContinue) {
+        Get-WinPushActiveCaptureContext
+    }
+
+    Invoke-Command `
             -Session $Session `
             -ScriptBlock $remoteScriptBlock `
             -ArgumentList $Command, $Shell `
-            -ErrorAction Stop) | Select-Object -First 1
+            -ErrorAction Stop | ForEach-Object {
+        if ($_.Type -eq 'Output') {
+            $output.Add($_.Value)
+            if ($null -ne $activeCaptureContext) {
+                Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Output -Value $_.Value
+            }
+        }
+        elseif ($_.Type -eq 'Error') {
+            $errors.Add([string] $_.Value)
+            if ($null -ne $activeCaptureContext) {
+                Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Error -Value $_.Value
+            }
+        }
+        elseif ($_.Type -eq 'Completed') {
+            $state.ExitCode = $_.Value
+        }
+    }
 
     [pscustomobject] [ordered] @{
         PSTypeName = 'WinPush.PsrpCommandResult'
-        ExitCode   = $remoteResult.ExitCode
-        Output     = @($remoteResult.Output)
-        Errors     = @($remoteResult.Errors)
+        ExitCode   = $state.ExitCode
+        Output     = $output.ToArray()
+        Errors     = $errors.ToArray()
     }
 }

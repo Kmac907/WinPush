@@ -8,7 +8,11 @@ function Invoke-WinPushNativeProcess {
         [string[]] $ArgumentList = @(),
 
         [ValidateRange(0, 2147483647)]
-        [int] $TimeoutSeconds = 1800
+        [int] $TimeoutSeconds = 1800,
+
+        [scriptblock] $OutputCallback,
+
+        [scriptblock] $ErrorCallback
     )
 
     $process = $null
@@ -29,30 +33,58 @@ function Invoke-WinPushNativeProcess {
         $process.StartInfo = $startInfo
 
         [void] $process.Start()
-        $standardOutput = $process.StandardOutput.ReadToEndAsync()
-        $standardError = $process.StandardError.ReadToEndAsync()
+        $outputLines = [System.Collections.Generic.List[string]]::new()
+        $errorLines = [System.Collections.Generic.List[string]]::new()
+        $outputTask = $process.StandardOutput.ReadLineAsync()
+        $errorTask = $process.StandardError.ReadLineAsync()
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $timedOut = $false
-
-        if ($TimeoutSeconds -eq 0) {
-            $process.WaitForExit()
+        $activeCaptureContext = if (Get-Command -Name Get-WinPushActiveCaptureContext -ErrorAction SilentlyContinue) {
+            Get-WinPushActiveCaptureContext
         }
-        else {
-            $timeoutMilliseconds = [int] [System.Math]::Min(([long] $TimeoutSeconds * 1000), [int]::MaxValue)
-            $timedOut = -not $process.WaitForExit($timeoutMilliseconds)
-            if ($timedOut) {
-                try {
-                    $process.Kill($true)
+
+        while ($null -ne $outputTask -or $null -ne $errorTask) {
+            if (-not $timedOut -and $TimeoutSeconds -gt 0 -and $stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+                $timedOut = $true
+                $timeoutMessage = 'Process timed out after {0} seconds.' -f $TimeoutSeconds
+                Publish-WinPushNativeRecord -Type Error -Value $timeoutMessage -Callback $ErrorCallback -CaptureContext $activeCaptureContext
+                $process.Kill($true)
+            }
+
+            [System.Threading.Tasks.Task[]] $pendingTasks = @($outputTask, $errorTask | Where-Object { $null -ne $_ })
+            $completedIndex = [System.Threading.Tasks.Task]::WaitAny($pendingTasks, 50)
+            if ($completedIndex -lt 0) {
+                continue
+            }
+
+            $completedTask = $pendingTasks[$completedIndex]
+            if ($null -ne $outputTask -and $completedTask.Id -eq $outputTask.Id) {
+                $line = $outputTask.GetAwaiter().GetResult()
+                if ($null -eq $line) {
+                    $outputTask = $null
                 }
-                finally {
-                    $process.WaitForExit()
+                else {
+                    $outputLines.Add($line)
+                    Publish-WinPushNativeRecord -Type Output -Value $line -Callback $OutputCallback -CaptureContext $activeCaptureContext
+                    $outputTask = $process.StandardOutput.ReadLineAsync()
+                }
+            }
+            else {
+                $line = $errorTask.GetAwaiter().GetResult()
+                if ($null -eq $line) {
+                    $errorTask = $null
+                }
+                else {
+                    $errorLines.Add($line)
+                    Publish-WinPushNativeRecord -Type Error -Value $line -Callback $ErrorCallback -CaptureContext $activeCaptureContext
+                    $errorTask = $process.StandardError.ReadLineAsync()
                 }
             }
         }
 
-        $outputLines = @(ConvertTo-WinPushNativeTextArray -Text $standardOutput.GetAwaiter().GetResult())
-        $errorLines = @(ConvertTo-WinPushNativeTextArray -Text $standardError.GetAwaiter().GetResult())
+        $process.WaitForExit()
         if ($timedOut) {
-            $errorLines = @('Process timed out after {0} seconds.' -f $TimeoutSeconds) + $errorLines
+            $errorLines.Insert(0, ('Process timed out after {0} seconds.' -f $TimeoutSeconds))
         }
 
         $exitCode = if ($timedOut) { 124 } else { $process.ExitCode }
@@ -64,14 +96,45 @@ function Invoke-WinPushNativeProcess {
             Succeeded      = $exitCode -eq 0
             TimedOut       = $timedOut
             ExitCode       = $exitCode
-            StandardOutput = $outputLines
-            StandardError  = $errorLines
+            StandardOutput = $outputLines.ToArray()
+            StandardError  = $errorLines.ToArray()
         }
     }
     finally {
         if ($null -ne $process) {
             $process.Dispose()
         }
+    }
+}
+
+function Publish-WinPushNativeRecord {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('Output', 'Error')]
+        [string] $Type,
+
+        [Parameter(Mandatory)]
+        [string] $Value,
+
+        [scriptblock] $Callback,
+
+        [AllowNull()]
+        [psobject] $CaptureContext
+    )
+
+    if ($null -ne $Callback) {
+        try {
+            & $Callback $Value
+        }
+        catch {
+            return
+        }
+        return
+    }
+
+    if ($null -ne $CaptureContext) {
+        Write-WinPushCaptureRecord -Context $CaptureContext -Type $Type -Value $Value
     }
 }
 

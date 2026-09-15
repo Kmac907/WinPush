@@ -4,6 +4,7 @@ $script:ResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\P
 $script:ResultArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\Add-WinPushExecutionArtifact.ps1'
 $script:LogResultFactoryPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Results\New-WinPushLogResult.ps1'
 $script:ArtifactPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Write-WinPushCommandOutputArtifact.ps1'
+$script:CaptureContextPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\New-WinPushCaptureContext.ps1'
 $script:NativeProcessPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushNativeProcess.ps1'
 $script:WinRsCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushWinRsCommand.ps1'
 $script:PsExecCommandPath = Join-Path -Path $script:ModuleRoot -ChildPath 'src\Private\Execution\Invoke-WinPushPsExecCommand.ps1'
@@ -18,6 +19,7 @@ $script:FixtureRoot = Resolve-Path -LiteralPath (Join-Path -Path $PSScriptRoot -
 . $script:ResultFactoryPath
 . $script:ResultArtifactPath
 . $script:LogResultFactoryPath
+. $script:CaptureContextPath
 . $script:ArtifactPath
 . $script:NativeProcessPath
 . $script:WinRsCommandPath

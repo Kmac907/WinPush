@@ -73,7 +73,9 @@ function Write-WinPushResultArtifact {
         [object[]] $Errors = @(),
 
         [Parameter(Mandatory)]
-        [System.Text.Encoding] $Encoding
+        [System.Text.Encoding] $Encoding,
+
+        [switch] $Append
     )
 
     [string[]] $resultLines = @(
@@ -98,6 +100,20 @@ function Write-WinPushResultArtifact {
         'ErrorMessage Detail:'
         (ConvertTo-WinPushResultArtifactValue -Value $ErrorMessage)
     )
+
+    if ($Append) {
+        $writer = [System.IO.StreamWriter]::new($ResultPath, $true, $Encoding)
+        try {
+            $writer.WriteLine()
+            foreach ($line in $resultLines) {
+                $writer.WriteLine($line)
+            }
+        }
+        finally {
+            $writer.Dispose()
+        }
+        return
+    }
 
     [System.IO.File]::WriteAllLines($ResultPath, $resultLines, $Encoding)
 }
@@ -292,6 +308,93 @@ function Write-WinPushCommandOutputArtifact {
     $null = New-Item -Path $computerDirectory -ItemType Directory -Force
 
     $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+
+    $activeCaptureContext = if (Get-Command -Name Get-WinPushActiveCaptureContext -ErrorAction SilentlyContinue) {
+        Get-WinPushActiveCaptureContext
+    }
+    if ($null -ne $activeCaptureContext -and
+        $activeCaptureContext.RunDirectory -eq $runDirectory -and
+        $activeCaptureContext.ComputerName -eq $ComputerName) {
+        foreach ($item in @($Output | Select-Object -Skip $activeCaptureContext.OutputRecordCount)) {
+            Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Output -Value $item
+        }
+        foreach ($item in @($Errors | Select-Object -Skip $activeCaptureContext.ErrorRecordCount)) {
+            Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Error -Value $item
+        }
+        if ($activeCaptureContext.ErrorRecordCount -eq 0 -and -not [string]::IsNullOrWhiteSpace($ErrorMessage)) {
+            Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Error -Value $ErrorMessage
+        }
+        Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Stage -Value 'Completed'
+
+        if (-not $activeCaptureContext.FailedArtifacts.ContainsKey($resultPath)) {
+            try {
+                Write-WinPushResultArtifact `
+                    -ResultPath $resultPath `
+                    -ComputerName $ComputerName `
+                    -Operation $Operation `
+                    -Transport $Transport `
+                    -ArtifactIdentity $ArtifactIdentity `
+                    -Succeeded $Succeeded `
+                    -ExitCode $ExitCode `
+                    -ErrorMessage $ErrorMessage `
+                    -Output $Output `
+                    -Errors $Errors `
+                    -Encoding $utf8NoBom `
+                    -Append
+            }
+            catch {
+                Set-WinPushCaptureArtifactFailure -Context $activeCaptureContext -Path $resultPath -Message $_.Exception.Message
+            }
+        }
+
+        if (-not $activeCaptureContext.FailedArtifacts.ContainsKey($runLogPath)) {
+            try {
+                Write-WinPushCorrelatedRunLogArtifact `
+                    -RunLogPath $runLogPath `
+                    -ComputerName $ComputerName `
+                    -Operation $Operation `
+                    -Transport $Transport `
+                    -ArtifactIdentity $ArtifactIdentity `
+                    -Succeeded $Succeeded `
+                    -ExitCode $ExitCode `
+                    -ErrorMessage $ErrorMessage `
+                    -Output $Output `
+                    -Errors $Errors `
+                    -TargetResultPath $resultPath `
+                    -Encoding $utf8NoBom
+            }
+            catch {
+                Set-WinPushCaptureArtifactFailure -Context $activeCaptureContext -Path $runLogPath -Message $_.Exception.Message
+            }
+        }
+
+        if (-not $activeCaptureContext.FailedArtifacts.ContainsKey($summaryPath)) {
+            try {
+                Write-WinPushSummaryArtifact `
+                    -SummaryPath $summaryPath `
+                    -ComputerName $ComputerName `
+                    -Operation $Operation `
+                    -Transport $Transport `
+                    -Succeeded $Succeeded `
+                    -ExitCode $ExitCode `
+                    -ErrorMessage $ErrorMessage `
+                    -ResultPath $resultPath
+            }
+            catch {
+                Set-WinPushCaptureArtifactFailure -Context $activeCaptureContext -Path $summaryPath -Message $_.Exception.Message
+            }
+        }
+
+        return [pscustomobject] @{
+            RunDirectory      = $runDirectory
+            ComputerDirectory = $computerDirectory
+            ResultPath        = $resultPath
+            SummaryPath       = $summaryPath
+            RunLogPath        = $runLogPath
+            StdOutPath        = $null
+            StdErrPath        = $null
+        }
+    }
 
     Write-WinPushResultArtifact `
         -ResultPath $resultPath `

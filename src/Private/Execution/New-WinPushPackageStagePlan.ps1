@@ -298,28 +298,34 @@ function Invoke-WinPushPsrpPackageEntryPoint {
 
     [object[]] $invokeArguments = $entryPointPlan.PackageRoot, $entryPointPlan.RelativePath, $null
     $invokeArguments[2] = $ArgumentList
-    $streamItems = @(Invoke-Command `
-            -Session $Session `
-            -ScriptBlock $remoteScriptBlock `
-            -ArgumentList $invokeArguments `
-            -ErrorAction Stop)
-
-    $output = foreach ($item in $streamItems) {
-        if ($item.Stream -eq 'Output') {
-            $item.Value
-        }
+    $output = [System.Collections.Generic.List[object]]::new()
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $activeCaptureContext = if (Get-Command -Name Get-WinPushActiveCaptureContext -ErrorAction SilentlyContinue) {
+        Get-WinPushActiveCaptureContext
     }
-
-    $errors = foreach ($item in $streamItems) {
-        if ($item.Stream -eq 'Error') {
-            $item.Value
+    Invoke-Command `
+        -Session $Session `
+        -ScriptBlock $remoteScriptBlock `
+        -ArgumentList $invokeArguments `
+        -ErrorAction Stop | ForEach-Object {
+            if ($_.Stream -eq 'Error') {
+                $errors.Add([string] $_.Value)
+                if ($null -ne $activeCaptureContext) {
+                    Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Error -Value $_.Value
+                }
+            }
+            else {
+                $output.Add($_.Value)
+                if ($null -ne $activeCaptureContext) {
+                    Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Output -Value $_.Value
+                }
+            }
         }
-    }
 
     [pscustomobject] [ordered] @{
         PSTypeName = 'WinPush.PsrpPackageEntryPointResult'
-        Output     = @($output)
-        Errors     = @($errors)
+        Output     = $output.ToArray()
+        Errors     = $errors.ToArray()
     }
 }
 

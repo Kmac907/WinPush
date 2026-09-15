@@ -103,6 +103,17 @@ function Invoke-WinPushScript {
                 $logsEnabled = $false
             }
         }
+        $captureContext = if ($captureOutputEnabled -and $null -ne $sharedRunDirectory -and
+            (Get-Command -Name New-WinPushCaptureContext -ErrorAction SilentlyContinue)) {
+            New-WinPushCaptureContext `
+                -RunDirectory $sharedRunDirectory `
+                -Operation 'RunScript' `
+                -Transport $Transport `
+                -ArtifactIdentity $resolvedScriptPath
+        }
+        if ($null -ne $captureContext -and -not [string]::IsNullOrWhiteSpace($captureContext.ArtifactError)) {
+            $artifactError = $captureContext.ArtifactError
+        }
 
         foreach ($target in $targets) {
             $session = $null
@@ -115,6 +126,12 @@ function Invoke-WinPushScript {
                 $sessionParameters['Credential'] = $Credential
             }
 
+            if ($null -ne $captureContext) {
+                $null = Start-WinPushCaptureTarget -Context $captureContext -ComputerName $target -Transport $Transport
+                Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Started'
+                $artifactError = $captureContext.ArtifactError
+            }
+
             if ($Transport -eq 'WinRM' -or $Transport -eq 'PsExec') {
                 $stagePlan = $null
                 $output = @()
@@ -125,6 +142,9 @@ function Invoke-WinPushScript {
 
                 try {
                     $stagePlan = New-WinPushNativeScriptStagePlan -ComputerName $target -ScriptPath $resolvedScriptPath
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Upload Started'
+                    }
                     Copy-WinPushNativeScriptToStage `
                         -ComputerName $target `
                         -ScriptPath $resolvedScriptPath `
@@ -132,6 +152,10 @@ function Invoke-WinPushScript {
                         -Transport $Transport `
                         -PsExecPath $PsExecPath `
                         -TimeoutSeconds $TimeoutSeconds
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Upload Completed'
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Execution Started'
+                    }
                     $nativeScriptCommand = New-WinPushNativeStagedScriptCommand -RemoteScriptPath $stagePlan.RemoteScriptPath
 
                     $scriptResult = if ($Transport -eq 'WinRM') {
@@ -161,6 +185,9 @@ function Invoke-WinPushScript {
                 }
                 catch {
                     $errorMessage = $_.Exception.Message
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Error -Value $errorMessage
+                    }
                     $errors = @($errorMessage)
                     $exitCode = 1
                     $succeeded = $false
@@ -168,15 +195,24 @@ function Invoke-WinPushScript {
 
                 if ($null -ne $stagePlan -and -not $KeepStagedScript) {
                     try {
+                        if ($null -ne $captureContext) {
+                            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Cleanup Started'
+                        }
                         Remove-WinPushNativeScriptStage `
                             -ComputerName $target `
                             -StagePlan $stagePlan `
                             -Transport $Transport `
                             -PsExecPath $PsExecPath `
                             -TimeoutSeconds $TimeoutSeconds
+                        if ($null -ne $captureContext) {
+                            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Cleanup Completed'
+                        }
                     }
                     catch {
                         $cleanupError = $_.Exception.Message
+                        if ($null -ne $captureContext) {
+                            Write-WinPushCaptureRecord -Context $captureContext -Type Error -Value $cleanupError
+                        }
                         $errors = @($errors) + $cleanupError
 
                         if ($succeeded) {
@@ -205,7 +241,10 @@ function Invoke-WinPushScript {
                         -Result $result `
                         -OutputRoot $OutputRoot `
                         -ArtifactIdentity $resolvedScriptPath
-                    if ($null -ne $result.ArtifactError) {
+                    if ($null -ne $captureContext) {
+                        $result.ArtifactError = $captureContext.ArtifactError
+                    }
+                    elseif ($null -ne $result.ArtifactError) {
                         $artifactError = $result.ArtifactError
                         $captureOutputEnabled = $false
                     }
@@ -246,6 +285,10 @@ function Invoke-WinPushScript {
                         $_.Exception.Message
                     }
 
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Error -Value $errorMessage
+                    }
+
                     $result = New-WinPushExecutionResult `
                         -ComputerName $target `
                         -Transport 'Psrp' `
@@ -259,28 +302,39 @@ function Invoke-WinPushScript {
                         -Script $scriptDisplayName
                 }
 
-                if ($captureOutputEnabled) {
-                    $previousArtifactError = $result.ArtifactError
-                    $result = Add-WinPushExecutionArtifact `
-                        -Result $result `
-                        -OutputRoot $OutputRoot `
-                        -ArtifactIdentity $resolvedScriptPath
-                    if ($result.ArtifactError -ne $previousArtifactError) {
-                        $artifactError = $result.ArtifactError
-                        $captureOutputEnabled = $false
-                    }
-                }
-
                 if ($logsEnabled -and $null -ne $session) {
+                    if ($null -ne $captureContext) {
+                        $result.ComputerDirectory = $captureContext.ComputerDirectory
+                        $result.ResultPath = $captureContext.ResultPath
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Started'
+                    }
                     $previousArtifactError = $result.ArtifactError
                     $result = Add-WinPushExecutionLogArtifact `
                         -Result $result `
                         -Session $session `
                         -OutputRoot $OutputRoot `
                         -RemoteLogDirectory $remoteLogDirectory
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Completed'
+                    }
                     if ($result.ArtifactError -ne $previousArtifactError) {
                         $artifactError = $result.ArtifactError
                         $logsEnabled = $false
+                    }
+                }
+
+                if ($captureOutputEnabled) {
+                    $previousArtifactError = $result.ArtifactError
+                    $result = Add-WinPushExecutionArtifact `
+                        -Result $result `
+                        -OutputRoot $OutputRoot `
+                        -ArtifactIdentity $resolvedScriptPath
+                    if ($null -ne $captureContext) {
+                        $result.ArtifactError = $captureContext.ArtifactError
+                    }
+                    elseif ($result.ArtifactError -ne $previousArtifactError) {
+                        $artifactError = $result.ArtifactError
+                        $captureOutputEnabled = $false
                     }
                 }
 

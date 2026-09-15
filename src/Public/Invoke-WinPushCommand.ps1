@@ -89,6 +89,17 @@ function Invoke-WinPushCommand {
                 $logsEnabled = $false
             }
         }
+        $captureContext = if ($captureOutputEnabled -and $null -ne $sharedRunDirectory -and
+            (Get-Command -Name New-WinPushCaptureContext -ErrorAction SilentlyContinue)) {
+            New-WinPushCaptureContext `
+                -RunDirectory $sharedRunDirectory `
+                -Operation 'RunCommand' `
+                -Transport $Transport `
+                -ArtifactIdentity $Command
+        }
+        if ($null -ne $captureContext -and -not [string]::IsNullOrWhiteSpace($captureContext.ArtifactError)) {
+            $artifactError = $captureContext.ArtifactError
+        }
 
         foreach ($target in $targets) {
             $session = $null
@@ -99,6 +110,12 @@ function Invoke-WinPushCommand {
 
             if ($PSBoundParameters.ContainsKey('Credential')) {
                 $sessionParameters['Credential'] = $Credential
+            }
+
+            if ($null -ne $captureContext) {
+                $null = Start-WinPushCaptureTarget -Context $captureContext -ComputerName $target -Transport $Transport
+                Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Execution Started'
+                $artifactError = $captureContext.ArtifactError
             }
 
             if ($Transport -eq 'WinRM' -or $Transport -eq 'PsExec') {
@@ -142,6 +159,9 @@ function Invoke-WinPushCommand {
                 }
                 catch {
                     $errorMessage = $_.Exception.Message
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Error -Value $errorMessage
+                    }
                     $result = New-WinPushExecutionResult `
                         -ComputerName $target `
                         -Transport $Transport `
@@ -159,7 +179,10 @@ function Invoke-WinPushCommand {
                         -Result $result `
                         -OutputRoot $OutputRoot `
                         -ArtifactIdentity $Command
-                    if ($null -ne $result.ArtifactError) {
+                    if ($null -ne $captureContext) {
+                        $result.ArtifactError = $captureContext.ArtifactError
+                    }
+                    elseif ($null -ne $result.ArtifactError) {
                         $artifactError = $result.ArtifactError
                         $captureOutputEnabled = $false
                     }
@@ -207,6 +230,10 @@ function Invoke-WinPushCommand {
                         $_.Exception.Message
                     }
 
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Error -Value $errorMessage
+                    }
+
                     $result = New-WinPushExecutionResult `
                         -ComputerName $target `
                         -Transport 'Psrp' `
@@ -219,24 +246,35 @@ function Invoke-WinPushCommand {
                         -RunDirectory $sharedRunDirectory
                 }
 
+                if ($logsEnabled -and $null -ne $session) {
+                    if ($null -ne $captureContext) {
+                        $result.ComputerDirectory = $captureContext.ComputerDirectory
+                        $result.ResultPath = $captureContext.ResultPath
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Started'
+                    }
+                    $result = Add-WinPushExecutionLogArtifact `
+                        -Result $result `
+                        -Session $session `
+                        -OutputRoot $OutputRoot `
+                        -RemoteLogDirectory $remoteLogDirectory
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Completed'
+                    }
+                }
+
                 if ($captureOutputEnabled) {
                     $previousArtifactError = $result.ArtifactError
                     $result = Add-WinPushExecutionArtifact `
                         -Result $result `
                         -OutputRoot $OutputRoot `
                         -ArtifactIdentity $Command
-                    if ($result.ArtifactError -ne $previousArtifactError) {
+                    if ($null -ne $captureContext) {
+                        $result.ArtifactError = $captureContext.ArtifactError
+                    }
+                    elseif ($result.ArtifactError -ne $previousArtifactError) {
                         $artifactError = $result.ArtifactError
                         $captureOutputEnabled = $false
                     }
-                }
-
-                if ($logsEnabled -and $null -ne $session) {
-                    $result = Add-WinPushExecutionLogArtifact `
-                        -Result $result `
-                        -Session $session `
-                        -OutputRoot $OutputRoot `
-                        -RemoteLogDirectory $remoteLogDirectory
                 }
 
                 $result

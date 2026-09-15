@@ -39,15 +39,27 @@ function Set-WinPushPackageCleanupResult {
     }
 
     try {
+        $captureContext = if (Get-Command -Name Get-WinPushActiveCaptureContext -ErrorAction SilentlyContinue) {
+            Get-WinPushActiveCaptureContext
+        }
+        if ($null -ne $captureContext) {
+            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Cleanup Started'
+        }
         Remove-WinPushPsrpPackageStage `
             -Session $Session `
             -StagePlan $StagePlan `
             -RemoteStageRoot $RemoteStageRoot
 
         $Result.PackageMetadata.CleanupSucceeded = $true
+        if ($null -ne $captureContext) {
+            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Cleanup Completed'
+        }
     }
     catch {
         $Result.PackageMetadata.CleanupSucceeded = $false
+        if ($null -ne $captureContext) {
+            Write-WinPushCaptureRecord -Context $captureContext -Type Error -Value $_
+        }
     }
 
     $Result
@@ -140,6 +152,7 @@ function Invoke-WinPushPackage {
         $captureOutputEnabled = [bool] $CaptureOutput
         $logsEnabled = [bool] $Logs
         $cachePlan = $null
+        $captureContext = $null
 
         try {
             if ($CaptureOutput -or $Logs) {
@@ -159,6 +172,17 @@ function Invoke-WinPushPackage {
             $localPackagePath = if ($isUriPackageSet) { $null } else { $Path }
             $packageIsDirectory = $false
             $artifactIdentity = '{0}: {1}; EntryPoint: {2}' -f $packageSourceType, $packageSource, $EntryPoint
+            $captureContext = if ($captureOutputEnabled -and $null -ne $sharedRunDirectory -and
+                (Get-Command -Name New-WinPushCaptureContext -ErrorAction SilentlyContinue)) {
+                New-WinPushCaptureContext `
+                    -RunDirectory $sharedRunDirectory `
+                    -Operation 'RunPackage' `
+                    -Transport 'Psrp' `
+                    -ArtifactIdentity $artifactIdentity
+            }
+            if ($null -ne $captureContext -and -not [string]::IsNullOrWhiteSpace($captureContext.ArtifactError)) {
+                $artifactError = $captureContext.ArtifactError
+            }
 
             try {
                 if ($isUriPackageSet) {
@@ -177,11 +201,23 @@ function Invoke-WinPushPackage {
                         throw [System.ArgumentException]::new('Extract requires a staged .zip package file.')
                     }
 
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Download Started' -RootOnly
+                    }
                     $localPackagePath = Save-WinPushPackageUriToCache -Uri $Uri -CachePlan $cachePlan
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Download Completed' -RootOnly
+                    }
                     if ($PSBoundParameters.ContainsKey('ExpectedSha256')) {
+                        if ($null -ne $captureContext) {
+                            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Validation Started' -RootOnly
+                        }
                         $actualSha256 = (Get-FileHash -LiteralPath $localPackagePath -Algorithm SHA256 -ErrorAction Stop).Hash
                         if (-not $actualSha256.Equals($ExpectedSha256, [System.StringComparison]::OrdinalIgnoreCase)) {
                             throw [System.IO.InvalidDataException]::new('Downloaded package SHA256 does not match ExpectedSha256.')
+                        }
+                        if ($null -ne $captureContext) {
+                            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Validation Completed' -RootOnly
                         }
                     }
                 }
@@ -218,6 +254,9 @@ function Invoke-WinPushPackage {
                 }
             }
             catch {
+                if ($null -ne $captureContext) {
+                    Write-WinPushCaptureRecord -Context $captureContext -Type Error -Value $_ -RootOnly
+                }
                 $failureTargets = if ($isUriPackageSet -and $targets.Count -gt 0) {
                     @($targets)
                 }
@@ -232,6 +271,9 @@ function Invoke-WinPushPackage {
                 }
 
                 foreach ($failureTarget in $failureTargets) {
+                    if ($null -ne $captureContext) {
+                        $null = Start-WinPushCaptureTarget -Context $captureContext -ComputerName $failureTarget -Transport 'Psrp'
+                    }
                     $metadata = $null
                     if ($isUriPackageSet -and $null -ne $cachePlan) {
                         $metadata = New-WinPushPackageInfo `
@@ -261,7 +303,10 @@ function Invoke-WinPushPackage {
                             -OutputRoot $OutputRoot `
                             -ArtifactIdentity $artifactIdentity `
                             -RunDirectory $sharedRunDirectory
-                        if ($result.ArtifactError -ne $previousArtifactError) {
+                        if ($null -ne $captureContext) {
+                            $result.ArtifactError = $captureContext.ArtifactError
+                        }
+                        elseif ($result.ArtifactError -ne $previousArtifactError) {
                             $artifactError = $result.ArtifactError
                             $captureOutputEnabled = $false
                         }
@@ -295,6 +340,12 @@ function Invoke-WinPushPackage {
                 $executionEnded = $null
                 $sessionCreationStarted = $false
 
+                if ($null -ne $captureContext) {
+                    $null = Start-WinPushCaptureTarget -Context $captureContext -ComputerName $target -Transport 'Psrp'
+                    Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Started'
+                    $artifactError = $captureContext.ArtifactError
+                }
+
                 try {
                     $sessionParameters = @{
                         ComputerName = $target
@@ -311,26 +362,44 @@ function Invoke-WinPushPackage {
                         -RemoteStageRoot $RemoteStageRoot `
                         -PackagePath $sourcePreparation.LocalPackagePath `
                         -Directory:$sourcePreparation.IsDirectory
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Upload Started'
+                    }
                     Invoke-WinPushPsrpPackageStage `
                         -Session $session `
                         -LocalPackagePath $sourcePreparation.LocalPackagePath `
                         -StagePlan $stagePlan
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Upload Completed'
+                    }
                     $remoteStagePath = $stagePlan.RemotePackagePath
                     $packageRoot = $stagePlan.RemoteDirectory
                     if ($Extract) {
+                        if ($null -ne $captureContext) {
+                            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Extraction Started'
+                        }
                         Invoke-WinPushPsrpPackageExtract -Session $session -StagePlan $stagePlan
                         $remoteStagePath = $stagePlan.RemoteDirectory
                         $packageRoot = $stagePlan.RemoteDirectory
                         $extracted = $true
+                        if ($null -ne $captureContext) {
+                            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Extraction Completed'
+                        }
                     }
 
                     $executionStarted = [datetime]::UtcNow
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Execution Started'
+                    }
                     $packageExecution = Invoke-WinPushPsrpPackageEntryPoint `
                         -Session $session `
                         -PackageRoot $packageRoot `
                         -EntryPoint $EntryPoint `
                         -ArgumentList $ArgumentList
                     $executionEnded = [datetime]::UtcNow
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Execution Completed'
+                    }
                     $output = @($packageExecution.Output)
                     $errors = @($packageExecution.Errors)
                     $succeeded = $errors.Count -eq 0
@@ -360,23 +429,14 @@ function Invoke-WinPushPackage {
                         -RunDirectory $sharedRunDirectory `
                         -PackageMetadata $metadata
 
-                    if ($captureOutputEnabled) {
-                        $previousArtifactError = $result.ArtifactError
-                        $result = Add-WinPushExecutionArtifact `
-                            -Result $result `
-                            -OutputRoot $OutputRoot `
-                            -ArtifactIdentity $sourcePreparation.ArtifactIdentity `
-                            -RunDirectory $sharedRunDirectory
-                        $sharedRunDirectory = $result.RunDirectory
-                        if ($result.ArtifactError -ne $previousArtifactError) {
-                            $artifactError = $result.ArtifactError
-                            $captureOutputEnabled = $false
-                        }
-                    }
-
                     if ($logsEnabled) {
                         if ([string]::IsNullOrWhiteSpace($result.RunDirectory) -and -not [string]::IsNullOrWhiteSpace($sharedRunDirectory)) {
                             $result.RunDirectory = $sharedRunDirectory
+                        }
+                        if ($null -ne $captureContext) {
+                            $result.ComputerDirectory = $captureContext.ComputerDirectory
+                            $result.ResultPath = $captureContext.ResultPath
+                            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Started'
                         }
 
                         $previousArtifactError = $result.ArtifactError
@@ -385,6 +445,9 @@ function Invoke-WinPushPackage {
                             -Session $session `
                             -OutputRoot $OutputRoot `
                             -RemoteLogDirectory $remoteLogDirectory
+                        if ($null -ne $captureContext) {
+                            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Completed'
+                        }
                         $sharedRunDirectory = $result.RunDirectory
                         if ($result.ArtifactError -ne $previousArtifactError) {
                             $artifactError = $result.ArtifactError
@@ -399,6 +462,23 @@ function Invoke-WinPushPackage {
                         -RemoteStageRoot $RemoteStageRoot `
                         -Cleanup $Cleanup
 
+                    if ($captureOutputEnabled) {
+                        $previousArtifactError = $result.ArtifactError
+                        $result = Add-WinPushExecutionArtifact `
+                            -Result $result `
+                            -OutputRoot $OutputRoot `
+                            -ArtifactIdentity $sourcePreparation.ArtifactIdentity `
+                            -RunDirectory $sharedRunDirectory
+                        $sharedRunDirectory = $result.RunDirectory
+                        if ($null -ne $captureContext) {
+                            $result.ArtifactError = $captureContext.ArtifactError
+                        }
+                        elseif ($result.ArtifactError -ne $previousArtifactError) {
+                            $artifactError = $result.ArtifactError
+                            $captureOutputEnabled = $false
+                        }
+                    }
+
                     $result
                 }
                 catch {
@@ -411,6 +491,9 @@ function Invoke-WinPushPackage {
                     }
                     else {
                         $_.Exception.Message
+                    }
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Error -Value $errorMessage
                     }
 
                     $metadata = $null
@@ -446,23 +529,14 @@ function Invoke-WinPushPackage {
                         -RunDirectory $sharedRunDirectory `
                         -PackageMetadata $metadata
 
-                    if ($captureOutputEnabled -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
-                        $previousArtifactError = $result.ArtifactError
-                        $result = Add-WinPushExecutionArtifact `
-                            -Result $result `
-                            -OutputRoot $OutputRoot `
-                            -ArtifactIdentity $sourcePreparation.ArtifactIdentity `
-                            -RunDirectory $sharedRunDirectory
-                        $sharedRunDirectory = $result.RunDirectory
-                        if ($result.ArtifactError -ne $previousArtifactError) {
-                            $artifactError = $result.ArtifactError
-                            $captureOutputEnabled = $false
-                        }
-                    }
-
                     if ($logsEnabled -and $null -ne $session -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
                         if ([string]::IsNullOrWhiteSpace($result.RunDirectory) -and -not [string]::IsNullOrWhiteSpace($sharedRunDirectory)) {
                             $result.RunDirectory = $sharedRunDirectory
+                        }
+                        if ($null -ne $captureContext) {
+                            $result.ComputerDirectory = $captureContext.ComputerDirectory
+                            $result.ResultPath = $captureContext.ResultPath
+                            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Started'
                         }
 
                         $previousArtifactError = $result.ArtifactError
@@ -471,6 +545,9 @@ function Invoke-WinPushPackage {
                             -Session $session `
                             -OutputRoot $OutputRoot `
                             -RemoteLogDirectory $remoteLogDirectory
+                        if ($null -ne $captureContext) {
+                            Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Completed'
+                        }
                         $sharedRunDirectory = $result.RunDirectory
                         if ($result.ArtifactError -ne $previousArtifactError) {
                             $artifactError = $result.ArtifactError
@@ -485,6 +562,23 @@ function Invoke-WinPushPackage {
                         -RemoteStageRoot $RemoteStageRoot `
                         -Cleanup $Cleanup
 
+                    if ($captureOutputEnabled -and -not [string]::IsNullOrWhiteSpace($result.ComputerName)) {
+                        $previousArtifactError = $result.ArtifactError
+                        $result = Add-WinPushExecutionArtifact `
+                            -Result $result `
+                            -OutputRoot $OutputRoot `
+                            -ArtifactIdentity $sourcePreparation.ArtifactIdentity `
+                            -RunDirectory $sharedRunDirectory
+                        $sharedRunDirectory = $result.RunDirectory
+                        if ($null -ne $captureContext) {
+                            $result.ArtifactError = $captureContext.ArtifactError
+                        }
+                        elseif ($result.ArtifactError -ne $previousArtifactError) {
+                            $artifactError = $result.ArtifactError
+                            $captureOutputEnabled = $false
+                        }
+                    }
+
                     $result
                 }
                 finally {
@@ -496,7 +590,13 @@ function Invoke-WinPushPackage {
         }
         finally {
             if ($null -ne $cachePlan -and (Test-Path -LiteralPath $cachePlan.CacheDirectory)) {
+                if ($null -ne $captureContext) {
+                    Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Cleanup Started' -RootOnly
+                }
                 Remove-Item -LiteralPath $cachePlan.CacheDirectory -Recurse -Force -ErrorAction SilentlyContinue
+                if ($null -ne $captureContext) {
+                    Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Cleanup Completed' -RootOnly
+                }
             }
         }
     }

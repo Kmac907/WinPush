@@ -8,28 +8,41 @@ function Invoke-WinPushPsrpScript {
         [string] $FilePath
     )
 
-    $invokeErrors = @()
     $output = @()
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $activeCaptureContext = if (Get-Command -Name Get-WinPushActiveCaptureContext -ErrorAction SilentlyContinue) {
+        Get-WinPushActiveCaptureContext
+    }
 
     try {
-        $null = Invoke-Command `
-                -Session $Session `
-                -FilePath $FilePath `
-                -OutVariable output `
-                -ErrorVariable invokeErrors `
-                -ErrorAction SilentlyContinue
+        Invoke-Command `
+            -Session $Session `
+            -FilePath $FilePath `
+            -OutVariable output `
+            -ErrorAction Continue 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                $errors.Add([string] $_)
+                if ($null -ne $activeCaptureContext) {
+                    Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Error -Value $_
+                }
+            }
+            else {
+                if ($null -ne $activeCaptureContext) {
+                    Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Output -Value $_
+                }
+            }
+        }
     }
     catch {
-        $invokeErrors += $_
-    }
-
-    $errors = foreach ($errorRecord in @($invokeErrors)) {
-        [string] $errorRecord
+        $errors.Add([string] $_)
+        if ($null -ne $activeCaptureContext) {
+            Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Error -Value $_
+        }
     }
 
     [pscustomobject] [ordered] @{
         PSTypeName = 'WinPush.PsrpScriptResult'
         Output     = @($output)
-        Errors     = @($errors)
+        Errors     = $errors.ToArray()
     }
 }
