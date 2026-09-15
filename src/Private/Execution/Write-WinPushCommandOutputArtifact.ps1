@@ -13,14 +13,11 @@ function ConvertTo-WinPushCommandArtifactText {
         if ($null -eq $item) {
             ''
         }
+        elseif ($item -is [string] -or $item.GetType().IsValueType) {
+            [string] $item
+        }
         else {
-            $text = [string] $item
-            if ($text.Length -gt 0) {
-                $text
-            }
-            else {
-                $item | Format-List * | Out-String -Stream
-            }
+            ConvertTo-Json -InputObject $item -Compress -Depth 5
         }
     }
 
@@ -235,11 +232,7 @@ function Write-WinPushSummaryArtifact {
     }
 
     if (Test-Path -LiteralPath $SummaryPath -PathType Leaf) {
-        $rows = @(
-            Import-Csv -LiteralPath $SummaryPath
-            $row
-        )
-        $rows | Export-Csv -LiteralPath $SummaryPath -NoTypeInformation
+        $row | Export-Csv -LiteralPath $SummaryPath -NoTypeInformation -Append
         return
     }
 
@@ -287,17 +280,11 @@ function Write-WinPushCommandOutputArtifact {
     $runDirectory = $RunDirectory
 
     if ([string]::IsNullOrWhiteSpace($runDirectory)) {
-        $runName = Get-Date -Format 'dd-MM-yyyy-HHmmss'
-        $runDirectory = Join-Path -Path $OutputRoot -ChildPath $runName
-        $suffix = 1
-
-        while (Test-Path -LiteralPath $runDirectory) {
-            $runDirectory = Join-Path -Path $OutputRoot -ChildPath ('{0}-{1}' -f $runName, $suffix)
-            $suffix++
-        }
+        $runDirectory = New-WinPushArtifactRunDirectory -OutputRoot $OutputRoot
     }
 
-    $computerDirectory = Join-Path -Path $runDirectory -ChildPath $ComputerName
+    $targetName = ConvertTo-WinPushArtifactTargetName -ComputerName $ComputerName
+    $computerDirectory = Join-Path -Path $runDirectory -ChildPath $targetName
     $summaryPath = Join-Path -Path $runDirectory -ChildPath 'summary.csv'
     $runLogPath = Join-Path -Path $runDirectory -ChildPath 'run.log'
     $resultPath = Join-Path -Path $computerDirectory -ChildPath 'run.log'

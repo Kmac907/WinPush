@@ -1,3 +1,53 @@
+function New-WinPushArtifactRunDirectory {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $OutputRoot
+    )
+
+    $runName = '{0}-{1}' -f (Get-Date -Format 'dd-MM-yyyy-HHmmss'), ([guid]::NewGuid().ToString('N'))
+    $runDirectory = Join-Path -Path $OutputRoot -ChildPath $runName
+    [System.IO.Directory]::CreateDirectory($runDirectory) | Out-Null
+    $runDirectory
+}
+
+function ConvertTo-WinPushArtifactTargetName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $ComputerName
+    )
+
+    $invalidNamePattern = '[\x00-\x1f<>:"/\\|?*]'
+    $reservedNamePattern = '^(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)'
+    $isUnsafe = $ComputerName -match $invalidNamePattern -or
+        $ComputerName -match '[ .]$' -or
+        $ComputerName -eq '.' -or
+        $ComputerName -eq '..' -or
+        $ComputerName -match $reservedNamePattern
+
+    if (-not $isUnsafe) {
+        return $ComputerName
+    }
+
+    $stem = ([regex]::Replace($ComputerName, $invalidNamePattern, '_')).TrimEnd([char[]] @(' ', '.'))
+    if ([string]::IsNullOrWhiteSpace($stem) -or $stem -eq '.' -or $stem -eq '..') {
+        $stem = 'target'
+    }
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = [System.BitConverter]::ToString(
+            $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($ComputerName))
+        ).Replace('-', '').Substring(0, 8).ToLowerInvariant()
+    }
+    finally {
+        $sha256.Dispose()
+    }
+
+    '{0}-{1}' -f $stem, $hash
+}
+
 function New-WinPushLogArtifactDirectory {
     [CmdletBinding()]
     param(
@@ -23,17 +73,11 @@ function New-WinPushLogArtifactDirectory {
 
     if ([string]::IsNullOrWhiteSpace($computerDirectory)) {
         if ([string]::IsNullOrWhiteSpace($runDirectory)) {
-            $runName = Get-Date -Format 'dd-MM-yyyy-HHmmss'
-            $runDirectory = Join-Path -Path $OutputRoot -ChildPath $runName
-            $suffix = 1
-
-            while (Test-Path -LiteralPath $runDirectory) {
-                $runDirectory = Join-Path -Path $OutputRoot -ChildPath ('{0}-{1}' -f $runName, $suffix)
-                $suffix++
-            }
+            $runDirectory = New-WinPushArtifactRunDirectory -OutputRoot $OutputRoot
         }
 
-        $computerDirectory = Join-Path -Path $runDirectory -ChildPath $ComputerName
+        $targetName = ConvertTo-WinPushArtifactTargetName -ComputerName $ComputerName
+        $computerDirectory = Join-Path -Path $runDirectory -ChildPath $targetName
     }
     elseif ([string]::IsNullOrWhiteSpace($runDirectory)) {
         $runDirectory = Split-Path -Path $computerDirectory -Parent
