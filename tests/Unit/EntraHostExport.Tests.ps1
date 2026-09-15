@@ -115,9 +115,10 @@ Describe 'Export-WinPushHostFileFromEntraGroup' {
     It 'uses a supplied group ID with direct membership by default' {
         $outputPath = Join-Path -Path $TestDrive -ChildPath 'direct.txt'
 
-        Export-WinPushHostFileFromEntraGroup -GroupId 'direct-group' -OutputPath $outputPath
+        $output = @(Export-WinPushHostFileFromEntraGroup -GroupId 'direct-group' -OutputPath $outputPath)
 
         @(Get-Content -LiteralPath $outputPath) | Should Be @('PC-001')
+        $output.Count | Should Be 0
         $script:DirectGroupIds | Should Be @('direct-group')
         Assert-MockCalled Get-MgGroup -Times 0 -Scope It
         Assert-MockCalled Get-MgGroupTransitiveMember -Times 0 -Scope It
