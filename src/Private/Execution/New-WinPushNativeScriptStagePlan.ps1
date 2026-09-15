@@ -5,7 +5,10 @@ function New-WinPushNativeScriptStagePlan {
         [string] $ComputerName,
 
         [Parameter(Mandatory)]
-        [string] $ScriptPath
+        [string] $ScriptPath,
+
+        [AllowNull()]
+        [string] $RemediateScriptPath
     )
 
     $stageId = [System.Guid]::NewGuid().ToString('N')
@@ -13,12 +16,26 @@ function New-WinPushNativeScriptStagePlan {
     $remoteDirectory = 'C:\Windows\Temp\WinPush\{0}' -f $stageId
     $remoteScriptPath = '{0}\{1}' -f $remoteDirectory, $scriptName
 
-    [pscustomobject] [ordered] @{
+    $plan = [pscustomobject] [ordered] @{
         PSTypeName       = 'WinPush.NativeScriptStagePlan'
         ComputerName     = $ComputerName
         RemoteDirectory  = $remoteDirectory
         RemoteScriptPath = $remoteScriptPath
     }
+
+    if (-not [string]::IsNullOrWhiteSpace($RemediateScriptPath)) {
+        $remediateScriptName = Split-Path -Path $RemediateScriptPath -Leaf
+        if ($remediateScriptName -eq $scriptName) {
+            $remediateScriptName = 'Remediate-{0}' -f $remediateScriptName
+        }
+
+        $plan | Add-Member -NotePropertyName RemoteDetectionScriptPath -NotePropertyValue $remoteScriptPath
+        $plan | Add-Member `
+            -NotePropertyName RemoteRemediationScriptPath `
+            -NotePropertyValue ('{0}\{1}' -f $remoteDirectory, $remediateScriptName)
+    }
+
+    $plan
 }
 
 function Copy-WinPushNativeScriptToStage {
@@ -81,6 +98,119 @@ if ([System.IO.File]::Exists($encodedBase64Path)) {
 }
 "@
     Invoke-WinPushNativeScriptStageCommand -ComputerName $ComputerName -Command $decodeScript -Transport $Transport -PsExecPath $PsExecPath -TimeoutSeconds $TimeoutSeconds
+}
+
+function Copy-WinPushRemediationScriptsToStage {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [object] $Session,
+
+        [Parameter(Mandatory)]
+        [string] $ComputerName,
+
+        [Parameter(Mandatory)]
+        [string] $DetectScriptPath,
+
+        [Parameter(Mandatory)]
+        [string] $RemediateScriptPath,
+
+        [Parameter(Mandatory)]
+        [object] $StagePlan,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('Psrp', 'WinRM', 'PsExec')]
+        [string] $Transport,
+
+        [AllowNull()]
+        [string] $PsExecPath,
+
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800
+    )
+
+    if ($Transport -eq 'Psrp') {
+        $null = Invoke-Command `
+            -Session $Session `
+            -ScriptBlock { [System.IO.Directory]::CreateDirectory([string] $args[0]) | Out-Null } `
+            -ArgumentList $StagePlan.RemoteDirectory `
+            -ErrorAction Stop
+        Copy-WinPushPsrpItem `
+            -Session $Session `
+            -Path $DetectScriptPath `
+            -Destination $StagePlan.RemoteDetectionScriptPath `
+            -Direction Upload
+        Copy-WinPushPsrpItem `
+            -Session $Session `
+            -Path $RemediateScriptPath `
+            -Destination $StagePlan.RemoteRemediationScriptPath `
+            -Direction Upload
+        return
+    }
+
+    Copy-WinPushNativeScriptToStage `
+        -ComputerName $ComputerName `
+        -ScriptPath $DetectScriptPath `
+        -StagePlan $StagePlan `
+        -Transport $Transport `
+        -PsExecPath $PsExecPath `
+        -TimeoutSeconds $TimeoutSeconds
+
+    $remediationPlan = [pscustomobject] @{
+        RemoteDirectory  = $StagePlan.RemoteDirectory
+        RemoteScriptPath = $StagePlan.RemoteRemediationScriptPath
+    }
+    Copy-WinPushNativeScriptToStage `
+        -ComputerName $ComputerName `
+        -ScriptPath $RemediateScriptPath `
+        -StagePlan $remediationPlan `
+        -Transport $Transport `
+        -PsExecPath $PsExecPath `
+        -TimeoutSeconds $TimeoutSeconds
+}
+
+function Remove-WinPushRemediationScriptStage {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [object] $Session,
+
+        [Parameter(Mandatory)]
+        [string] $ComputerName,
+
+        [Parameter(Mandatory)]
+        [object] $StagePlan,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('Psrp', 'WinRM', 'PsExec')]
+        [string] $Transport,
+
+        [AllowNull()]
+        [string] $PsExecPath,
+
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800
+    )
+
+    if ($Transport -eq 'Psrp') {
+        $null = Invoke-Command `
+            -Session $Session `
+            -ScriptBlock {
+                if ([System.IO.Directory]::Exists([string] $args[0])) {
+                    [System.IO.Directory]::Delete([string] $args[0], $true)
+                }
+            } `
+            -ArgumentList $StagePlan.RemoteDirectory `
+            -ErrorAction Stop
+        return
+    }
+
+    Remove-WinPushNativeScriptStage `
+        -ComputerName $ComputerName `
+        -StagePlan $StagePlan `
+        -Transport $Transport `
+        -PsExecPath $PsExecPath `
+        -TimeoutSeconds $TimeoutSeconds
 }
 
 function New-WinPushNativeStagedScriptCommand {

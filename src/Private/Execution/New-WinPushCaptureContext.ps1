@@ -99,7 +99,7 @@ function Write-WinPushCaptureRecord {
         [psobject] $Context,
 
         [Parameter(Mandatory)]
-        [ValidateSet('Operation', 'Target', 'Stage', 'Output', 'Error')]
+        [ValidateSet('Operation', 'Target', 'Stage', 'Output', 'Error', 'Log')]
         [string] $Type,
 
         [AllowNull()]

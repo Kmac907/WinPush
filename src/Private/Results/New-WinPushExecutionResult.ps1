@@ -54,7 +54,10 @@ function New-WinPushExecutionResult {
         [object] $PackageMetadata = $null,
 
         [AllowNull()]
-        [string] $Script = $null
+        [string] $Script = $null,
+
+        [AllowNull()]
+        [object] $RemediationMetadata = $null
     )
 
     [object[]] $normalizedOutput = @($Output | Where-Object { $null -ne $_ })
@@ -95,9 +98,14 @@ function New-WinPushExecutionResult {
         Script            = $normalizedScript
     }
 
+    if ($null -ne $RemediationMetadata) {
+        $result | Add-Member -NotePropertyName RemediationMetadata -NotePropertyValue $RemediationMetadata
+    }
+
     $operationTypeName = switch ($Operation) {
         'RunCommand' { 'WinPush.ExecutionResult.RunCommand' }
         'RunScript' { 'WinPush.ExecutionResult.RunScript' }
+        'RunRemediation' { 'WinPush.ExecutionResult.RunRemediation' }
         'RunPackage' { 'WinPush.ExecutionResult.RunPackage' }
         'CopyFile' { 'WinPush.ExecutionResult.CopyFile' }
         'GetLogs' { 'WinPush.ExecutionResult.GetLogs' }

@@ -27,6 +27,9 @@ function Copy-WinPushPsrpLogDirectory {
         -RunDirectory $RunDirectory `
         -ComputerDirectory $ComputerDirectory
     $logResults = @()
+    $activeCaptureContext = if (Get-Command -Name Get-WinPushActiveCaptureContext -ErrorAction SilentlyContinue) {
+        Get-WinPushActiveCaptureContext
+    }
 
     foreach ($file in $fileMetadata) {
         $localPath = Join-Path -Path $artifactDirectory.LogDirectory -ChildPath $file.Name
@@ -43,6 +46,10 @@ function Copy-WinPushPsrpLogDirectory {
                 -RemotePath $file.RemotePath `
                 -LocalPath $localPath `
                 -Copied $true
+
+            if ($null -ne $activeCaptureContext) {
+                Write-WinPushCaptureRecord -Context $activeCaptureContext -Type Log -Value $localPath
+            }
         }
         catch {
             $logResults += New-WinPushLogResult `
