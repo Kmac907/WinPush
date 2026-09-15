@@ -38,7 +38,10 @@ function Copy-WinPushNativeScriptToStage {
         [string] $Transport,
 
         [AllowNull()]
-        [string] $PsExecPath
+        [string] $PsExecPath,
+
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800
     )
 
     $base64Path = '{0}.b64' -f $StagePlan.RemoteScriptPath
@@ -58,7 +61,7 @@ if ([System.IO.File]::Exists($encodedBase64Path)) {
     [System.IO.File]::Delete($encodedBase64Path)
 }
 "@
-    Invoke-WinPushNativeScriptStageCommand -ComputerName $ComputerName -Command $initializeScript -Transport $Transport -PsExecPath $PsExecPath
+    Invoke-WinPushNativeScriptStageCommand -ComputerName $ComputerName -Command $initializeScript -Transport $Transport -PsExecPath $PsExecPath -TimeoutSeconds $TimeoutSeconds
 
     $chunkSize = 1000
     for ($offset = 0; $offset -lt $scriptPayload.Length; $offset += $chunkSize) {
@@ -66,7 +69,7 @@ if ([System.IO.File]::Exists($encodedBase64Path)) {
         $chunk = $scriptPayload.Substring($offset, $length)
         $encodedChunk = ConvertTo-WinPushPowerShellSingleQuotedString -Value $chunk
         $appendScript = "[System.IO.File]::AppendAllText($encodedBase64Path, $encodedChunk, [System.Text.Encoding]::ASCII)"
-        Invoke-WinPushNativeScriptStageCommand -ComputerName $ComputerName -Command $appendScript -Transport $Transport -PsExecPath $PsExecPath
+        Invoke-WinPushNativeScriptStageCommand -ComputerName $ComputerName -Command $appendScript -Transport $Transport -PsExecPath $PsExecPath -TimeoutSeconds $TimeoutSeconds
     }
 
     $decodeScript = @"
@@ -77,7 +80,7 @@ if ([System.IO.File]::Exists($encodedBase64Path)) {
     [System.IO.File]::Delete($encodedBase64Path)
 }
 "@
-    Invoke-WinPushNativeScriptStageCommand -ComputerName $ComputerName -Command $decodeScript -Transport $Transport -PsExecPath $PsExecPath
+    Invoke-WinPushNativeScriptStageCommand -ComputerName $ComputerName -Command $decodeScript -Transport $Transport -PsExecPath $PsExecPath -TimeoutSeconds $TimeoutSeconds
 }
 
 function New-WinPushNativeStagedScriptCommand {
@@ -105,7 +108,10 @@ function Remove-WinPushNativeScriptStage {
         [string] $Transport,
 
         [AllowNull()]
-        [string] $PsExecPath
+        [string] $PsExecPath,
+
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800
     )
 
     $encodedRemoteDirectory = ConvertTo-WinPushPowerShellSingleQuotedString -Value $StagePlan.RemoteDirectory
@@ -116,7 +122,7 @@ if ([System.IO.Directory]::Exists($encodedRemoteDirectory)) {
 }
 "@
 
-    Invoke-WinPushNativeScriptStageCommand -ComputerName $ComputerName -Command $cleanupScript -Transport $Transport -PsExecPath $PsExecPath
+    Invoke-WinPushNativeScriptStageCommand -ComputerName $ComputerName -Command $cleanupScript -Transport $Transport -PsExecPath $PsExecPath -TimeoutSeconds $TimeoutSeconds
 }
 
 function Invoke-WinPushNativeScriptStageCommand {
@@ -133,15 +139,18 @@ function Invoke-WinPushNativeScriptStageCommand {
         [string] $Transport,
 
         [AllowNull()]
-        [string] $PsExecPath
+        [string] $PsExecPath,
+
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800
     )
 
     $nativeCommand = New-WinPushNativePowerShellEncodedCommand -Command $Command
     $result = if ($Transport -eq 'WinRM') {
-        Invoke-WinPushWinRsCommand -ComputerName $ComputerName -Command $nativeCommand
+        Invoke-WinPushWinRsCommand -ComputerName $ComputerName -Command $nativeCommand -TimeoutSeconds $TimeoutSeconds
     }
     else {
-        Invoke-WinPushPsExecCommand -ComputerName $ComputerName -Command $nativeCommand -PsExecPath $PsExecPath
+        Invoke-WinPushPsExecCommand -ComputerName $ComputerName -Command $nativeCommand -PsExecPath $PsExecPath -TimeoutSeconds $TimeoutSeconds
     }
 
     if ($result.ExitCode -ne 0) {
@@ -152,18 +161,6 @@ function Invoke-WinPushNativeScriptStageCommand {
 
         throw ('Native script staging command exited with code {0}.' -f $result.ExitCode)
     }
-}
-
-function New-WinPushNativePowerShellEncodedCommand {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string] $Command
-    )
-
-    $encodedCommand = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($Command))
-
-    'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand {0}' -f $encodedCommand
 }
 
 function ConvertTo-WinPushPowerShellSingleQuotedString {

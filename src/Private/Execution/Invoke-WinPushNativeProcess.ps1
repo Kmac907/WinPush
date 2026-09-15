@@ -5,7 +5,10 @@ function Invoke-WinPushNativeProcess {
         [string] $FilePath,
 
         [AllowNull()]
-        [string[]] $ArgumentList = @()
+        [string[]] $ArgumentList = @(),
+
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800
     )
 
     $process = $null
@@ -28,15 +31,41 @@ function Invoke-WinPushNativeProcess {
         [void] $process.Start()
         $standardOutput = $process.StandardOutput.ReadToEndAsync()
         $standardError = $process.StandardError.ReadToEndAsync()
-        $process.WaitForExit()
+        $timedOut = $false
+
+        if ($TimeoutSeconds -eq 0) {
+            $process.WaitForExit()
+        }
+        else {
+            $timeoutMilliseconds = [int] [System.Math]::Min(([long] $TimeoutSeconds * 1000), [int]::MaxValue)
+            $timedOut = -not $process.WaitForExit($timeoutMilliseconds)
+            if ($timedOut) {
+                try {
+                    $process.Kill($true)
+                }
+                finally {
+                    $process.WaitForExit()
+                }
+            }
+        }
+
+        $outputLines = @(ConvertTo-WinPushNativeTextArray -Text $standardOutput.GetAwaiter().GetResult())
+        $errorLines = @(ConvertTo-WinPushNativeTextArray -Text $standardError.GetAwaiter().GetResult())
+        if ($timedOut) {
+            $errorLines = @('Process timed out after {0} seconds.' -f $TimeoutSeconds) + $errorLines
+        }
+
+        $exitCode = if ($timedOut) { 124 } else { $process.ExitCode }
 
         [pscustomobject] [ordered] @{
-            PSTypeName    = 'WinPush.NativeProcessResult'
-            FilePath      = $FilePath
-            ArgumentList  = @($ArgumentList)
-            ExitCode      = $process.ExitCode
-            StandardOutput = $standardOutput.GetAwaiter().GetResult()
-            StandardError  = $standardError.GetAwaiter().GetResult()
+            PSTypeName     = 'WinPush.NativeProcessResult'
+            FilePath       = $FilePath
+            ArgumentList   = @($ArgumentList)
+            Succeeded      = $exitCode -eq 0
+            TimedOut       = $timedOut
+            ExitCode       = $exitCode
+            StandardOutput = $outputLines
+            StandardError  = $errorLines
         }
     }
     finally {
@@ -44,4 +73,41 @@ function Invoke-WinPushNativeProcess {
             $process.Dispose()
         }
     }
+}
+
+function ConvertTo-WinPushNativeTextArray {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [object[]] $Text
+    )
+
+    if ($null -eq $Text -or $Text.Count -eq 0) {
+        return @()
+    }
+
+    $normalized = (@($Text) -join "`n") -replace "`r`n", "`n" -replace "`r", "`n"
+    if ($normalized.Length -eq 0) {
+        return @()
+    }
+
+    $lines = @($normalized -split "`n")
+
+    if ($lines.Count -gt 0 -and $lines[-1] -eq '') {
+        $lines = @($lines[0..($lines.Count - 2)])
+    }
+
+    return $lines
+}
+
+function New-WinPushNativePowerShellEncodedCommand {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string] $Command
+    )
+
+    $encodedCommand = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($Command))
+
+    'powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -EncodedCommand {0}' -f $encodedCommand
 }

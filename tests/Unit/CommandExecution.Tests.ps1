@@ -52,11 +52,13 @@ Describe 'Invoke-WinPushCommand' {
         $script:RemovedSessionIds = @()
         $script:InvokedSessionComputerNames = @()
         $script:InvokedScriptBlocks = @()
+        $script:InvokedShells = @()
         $script:SessionToReturn = [pscustomobject] @{ Id = 202; ComputerName = 'PC-001' }
         $script:InvokeCommandOutput = @('remote output')
         $script:InvokeCommandErrors = @()
         $script:NewPSSessionError = $null
         $script:InvokeCommandError = $null
+        $script:InvokeCommandExitCode = $null
         $script:SessionIdByComputerName = @{}
         $script:NewPSSessionErrorsByComputerName = @{}
         $script:InvokeCommandOutputsByComputerName = @{}
@@ -75,6 +77,7 @@ Describe 'Invoke-WinPushCommand' {
         $script:LogCopyReturnedCopiedLogPaths = $null
         $script:NativeProcessFilePaths = @()
         $script:NativeProcessArgumentLists = @()
+        $script:NativeProcessTimeouts = @()
         $script:NativeProcessError = $null
         $script:NativeProcessExitCode = 0
         $script:NativeProcessStandardOutput = "winrs output`r`n"
@@ -118,14 +121,16 @@ Describe 'Invoke-WinPushCommand' {
     Mock Invoke-WinPushPsrpCommand {
         param(
             $Session,
-            [scriptblock] $ScriptBlock
+            [string] $Command,
+            [string] $Shell
         )
 
         if ($null -ne $Session -and -not [string]::IsNullOrWhiteSpace($Session.ComputerName)) {
             $script:InvokedSessionComputerNames += $Session.ComputerName
         }
 
-        $script:InvokedScriptBlocks += $ScriptBlock.ToString()
+        $script:InvokedScriptBlocks += $Command
+        $script:InvokedShells += $Shell
         $script:OperationOrder += ('Command:{0}' -f $Session.ComputerName)
 
         if ($null -ne $script:InvokeCommandError) {
@@ -148,6 +153,7 @@ Describe 'Invoke-WinPushCommand' {
 
         return [pscustomobject] [ordered] @{
             PSTypeName = 'WinPush.PsrpCommandResult'
+            ExitCode   = if ($null -ne $script:InvokeCommandExitCode) { $script:InvokeCommandExitCode } elseif (@($errors).Count -eq 0) { 0 } else { 1 }
             Output     = @($output)
             Errors     = @($errors)
         }
@@ -230,11 +236,13 @@ Describe 'Invoke-WinPushCommand' {
     Mock Invoke-WinPushNativeProcess {
         param(
             [string] $FilePath,
-            [string[]] $ArgumentList
+            [string[]] $ArgumentList,
+            [int] $TimeoutSeconds
         )
 
         $script:NativeProcessFilePaths += $FilePath
         $script:NativeProcessArgumentLists += , @($ArgumentList)
+        $script:NativeProcessTimeouts += $TimeoutSeconds
         $computerName = if ($ArgumentList.Count -gt 0 -and $ArgumentList[0] -like '-r:*') {
             $ArgumentList[0].Substring(3)
         }
@@ -370,6 +378,72 @@ Describe 'Invoke-WinPushCommand' {
 
         @($script:NewPSSessionComputerNames).Count | Should Be 1
         @($script:NativeProcessFilePaths).Count | Should Be 0
+    }
+
+    It 'exposes the shell choices and forwards the default native timeout' {
+        $command = Get-Command -Name Invoke-WinPushCommand
+        $shellSet = @($command.Parameters['Shell'].Attributes | Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] })
+
+        ($shellSet[0].ValidValues -join ',') | Should Be 'Auto,PowerShell,Cmd'
+
+        Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -Transport WinRM | Out-Null
+
+        $script:NativeProcessTimeouts[0] | Should Be 1800
+    }
+
+    It 'rejects a negative timeout before starting execution' {
+        $timeoutError = $null
+        try { Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'hostname' -TimeoutSeconds -1 } catch { $timeoutError = $_ }
+
+        $null -eq $timeoutError | Should Be $false
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+    }
+
+    It 'encodes injection-shaped PowerShell text for <Transport> without evaluating it locally' -TestCases @(
+        @{ Transport = 'WinRM' }
+        @{ Transport = 'PsExec' }
+    ) {
+        param($Transport)
+
+        $marker = Join-Path -Path $TestDrive -ChildPath 'should-not-exist.txt'
+        $commandText = "Write-Output `$([System.IO.File]::WriteAllText('$marker', 'injected'))"
+        $parameters = @{
+            ComputerName   = 'PC-001'
+            Command        = $commandText
+            Transport      = $Transport
+            Shell          = 'PowerShell'
+            TimeoutSeconds = 17
+        }
+        if ($Transport -eq 'PsExec') {
+            $psExecPath = Join-Path -Path $TestDrive -ChildPath 'PsExec-shell.exe'
+            Set-Content -LiteralPath $psExecPath -Value 'test executable placeholder'
+            $parameters['PsExecPath'] = $psExecPath
+        }
+
+        Invoke-WinPushCommand @parameters | Out-Null
+
+        $nativeCommand = $script:NativeProcessArgumentLists[0][-1]
+        $encodedCommand = $nativeCommand -replace '^.*\s-EncodedCommand\s+', ''
+        [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String($encodedCommand)) | Should Be $commandText
+        Test-Path -LiteralPath $marker | Should Be $false
+        $script:NativeProcessTimeouts[0] | Should Be 17
+    }
+
+    It 'selects cmd over PSRP and propagates its exit code and streams' {
+        $script:InvokeCommandExitCode = 23
+        $script:InvokeCommandOutput = @('cmd output')
+        $script:InvokeCommandErrors = @('cmd error')
+
+        $result = Invoke-WinPushCommand -ComputerName 'PC-001' -Command 'echo literal $([invalid])' -Shell Cmd
+
+        $script:InvokedShells[0] | Should Be 'Cmd'
+        $script:InvokedScriptBlocks[0] | Should Be 'echo literal $([invalid])'
+        $result.ExitCode | Should Be 23
+        $result.Output[0] | Should Be 'cmd output'
+        $result.Errors[0] | Should Be 'cmd error'
+        $result.Succeeded | Should Be $false
+        (Get-Content -Raw -LiteralPath $script:PsrpCommandPath) | Should Match ([regex]::Escape('& cmd.exe /d /s /c $CommandText'))
     }
 
     It 'has optional command-attached log collection without arbitrary log directory passthrough' {

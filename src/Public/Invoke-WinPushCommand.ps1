@@ -14,6 +14,12 @@ function Invoke-WinPushCommand {
         [ValidateSet('Psrp', 'WinRM', 'PsExec')]
         [string] $Transport = 'Psrp',
 
+        [ValidateSet('Auto', 'PowerShell', 'Cmd')]
+        [string] $Shell = 'Auto',
+
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800,
+
         [AllowNull()]
         [string] $PsExecPath,
 
@@ -98,10 +104,10 @@ function Invoke-WinPushCommand {
             if ($Transport -eq 'WinRM' -or $Transport -eq 'PsExec') {
                 try {
                     $commandResult = if ($Transport -eq 'WinRM') {
-                        Invoke-WinPushWinRsCommand -ComputerName $target -Command $Command
+                        Invoke-WinPushWinRsCommand -ComputerName $target -Command $Command -Shell $Shell -TimeoutSeconds $TimeoutSeconds
                     }
                     else {
-                        Invoke-WinPushPsExecCommand -ComputerName $target -Command $Command -PsExecPath $PsExecPath
+                        Invoke-WinPushPsExecCommand -ComputerName $target -Command $Command -PsExecPath $PsExecPath -Shell $Shell -TimeoutSeconds $TimeoutSeconds
                     }
 
                     $exitCode = $commandResult.ExitCode
@@ -166,12 +172,19 @@ function Invoke-WinPushCommand {
             try {
                 try {
                     $session = New-PSSession @sessionParameters
-                    $scriptBlock = [scriptblock]::Create($Command)
-                    $commandResult = Invoke-WinPushPsrpCommand -Session $session -ScriptBlock $scriptBlock
+                    $commandResult = Invoke-WinPushPsrpCommand -Session $session -Command $Command -Shell $Shell
                     $output = @($commandResult.Output)
                     $errors = @($commandResult.Errors)
-                    $succeeded = $errors.Count -eq 0
-                    $exitCode = if ($succeeded) { 0 } else { 1 }
+                    $exitCode = if ($null -ne $commandResult.PSObject.Properties['ExitCode']) {
+                        $commandResult.ExitCode
+                    }
+                    elseif ($errors.Count -eq 0) {
+                        0
+                    }
+                    else {
+                        1
+                    }
+                    $succeeded = $exitCode -eq 0
                     $errorMessage = if ($errors.Count -gt 0) { [string] $errors[0] } else { $null }
 
                     $result = New-WinPushExecutionResult `

@@ -8,10 +8,22 @@ function Invoke-WinPushPsExecCommand {
         [string] $Command,
 
         [AllowNull()]
-        [string] $PsExecPath
+        [string] $PsExecPath,
+
+        [ValidateSet('Auto', 'PowerShell', 'Cmd')]
+        [string] $Shell = 'Auto',
+
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800
     )
 
     $resolvedPsExecPath = Resolve-WinPushPsExecPath -PsExecPath $PsExecPath
+    $nativeCommand = if ($Shell -eq 'PowerShell') {
+        New-WinPushNativePowerShellEncodedCommand -Command $Command
+    }
+    else {
+        $Command
+    }
 
     $nativeResult = Invoke-WinPushNativeProcess `
         -FilePath $resolvedPsExecPath `
@@ -22,8 +34,9 @@ function Invoke-WinPushPsExecCommand {
             '/d'
             '/s'
             '/c'
-            $Command
-        )
+            $nativeCommand
+        ) `
+        -TimeoutSeconds $TimeoutSeconds
 
     $succeeded = $nativeResult.ExitCode -eq 0
 
@@ -31,7 +44,7 @@ function Invoke-WinPushPsExecCommand {
         PSTypeName = 'WinPush.PsExecCommandResult'
         PsExecPath = $resolvedPsExecPath
         ExitCode   = $nativeResult.ExitCode
-        Output     = @(ConvertTo-WinPushPsExecTextArray -Text $nativeResult.StandardOutput)
+        Output     = @(ConvertTo-WinPushNativeTextArray -Text $nativeResult.StandardOutput)
         Errors     = @(ConvertTo-WinPushPsExecErrorArray -Text $nativeResult.StandardError -Succeeded $succeeded -ComputerName $ComputerName)
     }
 }
@@ -71,32 +84,11 @@ function Resolve-WinPushPsExecPath {
     return $discoveredCommand.Source
 }
 
-function ConvertTo-WinPushPsExecTextArray {
-    [CmdletBinding()]
-    param(
-        [AllowNull()]
-        [string] $Text
-    )
-
-    if ([string]::IsNullOrEmpty($Text)) {
-        return @()
-    }
-
-    $normalized = $Text -replace "`r`n", "`n" -replace "`r", "`n"
-    $lines = @($normalized -split "`n")
-
-    if ($lines.Count -gt 0 -and $lines[-1] -eq '') {
-        $lines = @($lines[0..($lines.Count - 2)])
-    }
-
-    return $lines
-}
-
 function ConvertTo-WinPushPsExecErrorArray {
     [CmdletBinding()]
     param(
         [AllowNull()]
-        [string] $Text,
+        [object[]] $Text,
 
         [bool] $Succeeded,
 
@@ -104,7 +96,7 @@ function ConvertTo-WinPushPsExecErrorArray {
         [string] $ComputerName
     )
 
-    $lines = @(ConvertTo-WinPushPsExecTextArray -Text $Text)
+    $lines = @(ConvertTo-WinPushNativeTextArray -Text $Text)
 
     $filteredLines = foreach ($line in $lines) {
         if ($Succeeded -and [string]::IsNullOrWhiteSpace($line)) {

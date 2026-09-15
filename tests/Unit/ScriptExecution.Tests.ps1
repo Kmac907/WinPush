@@ -86,6 +86,7 @@ Describe 'Invoke-WinPushScript' {
         $script:LogCopyReturnedCopiedLogPaths = $null
         $script:NativeProcessFilePaths = @()
         $script:NativeProcessArgumentLists = @()
+        $script:NativeProcessTimeouts = @()
         $script:NativeProcessError = $null
         $script:NativeProcessExitCode = 0
         $script:NativeProcessStandardOutput = "native script output`r`n"
@@ -96,7 +97,9 @@ Describe 'Invoke-WinPushScript' {
         $script:NativeProcessStandardErrorsByComputerName = @{}
         $script:NativeStageCopyScriptPaths = @()
         $script:NativeStageCopyPlans = @()
+        $script:NativeStageCopyTimeouts = @()
         $script:NativeStageCleanupPlans = @()
+        $script:NativeStageCleanupTimeouts = @()
         $script:NativeStageCopyError = $null
         $script:NativeStageCleanupError = $null
         $script:FixtureScript = Join-Path -Path $TestDrive -ChildPath 'Invoke-WinPushScript-Fixture.ps1'
@@ -246,11 +249,13 @@ Describe 'Invoke-WinPushScript' {
     Mock Invoke-WinPushNativeProcess {
         param(
             [string] $FilePath,
-            [string[]] $ArgumentList
+            [string[]] $ArgumentList,
+            [int] $TimeoutSeconds
         )
 
         $script:NativeProcessFilePaths += $FilePath
         $script:NativeProcessArgumentLists += , @($ArgumentList)
+        $script:NativeProcessTimeouts += $TimeoutSeconds
         $computerName = if ($ArgumentList.Count -gt 0 -and $ArgumentList[0] -like '-r:*') {
             $ArgumentList[0].Substring(3)
         }
@@ -303,13 +308,15 @@ Describe 'Invoke-WinPushScript' {
             $StagePlan,
             [string] $Transport,
             [AllowNull()]
-            [string] $PsExecPath
+            [string] $PsExecPath,
+            [int] $TimeoutSeconds
         )
 
         $null = $Transport
         $null = $PsExecPath
         $script:NativeStageCopyScriptPaths += $ScriptPath
         $script:NativeStageCopyPlans += $StagePlan
+        $script:NativeStageCopyTimeouts += $TimeoutSeconds
         $script:OperationOrder += ('Stage:{0}' -f $ComputerName)
 
         if ($null -ne $script:NativeStageCopyError) {
@@ -323,12 +330,14 @@ Describe 'Invoke-WinPushScript' {
             $StagePlan,
             [string] $Transport,
             [AllowNull()]
-            [string] $PsExecPath
+            [string] $PsExecPath,
+            [int] $TimeoutSeconds
         )
 
         $null = $Transport
         $null = $PsExecPath
         $script:NativeStageCleanupPlans += $StagePlan
+        $script:NativeStageCleanupTimeouts += $TimeoutSeconds
         $script:OperationOrder += ('Cleanup:{0}' -f $ComputerName)
 
         if ($null -ne $script:NativeStageCleanupError) {
@@ -390,6 +399,25 @@ Describe 'Invoke-WinPushScript' {
         Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript | Out-Null
 
         @($script:NewPSSessionComputerNames).Count | Should Be 1
+        @($script:NativeProcessFilePaths).Count | Should Be 0
+    }
+
+    It 'forwards a custom timeout through native script staging, execution, and cleanup' {
+        Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -Transport WinRM -TimeoutSeconds 19 | Out-Null
+
+        $script:NativeStageCopyTimeouts[0] | Should Be 19
+        $script:NativeProcessTimeouts[0] | Should Be 19
+        $script:NativeStageCleanupTimeouts[0] | Should Be 19
+    }
+
+    It 'exposes a default timeout and rejects negative values' {
+        $command = Get-Command -Name Invoke-WinPushScript
+        $timeoutError = $null
+
+        ($command.Parameters.Keys -contains 'TimeoutSeconds') | Should Be $true
+        try { Invoke-WinPushScript -ComputerName 'PC-001' -ScriptPath $script:FixtureScript -TimeoutSeconds -1 } catch { $timeoutError = $_ }
+        $null -eq $timeoutError | Should Be $false
+        @($script:NewPSSessionComputerNames).Count | Should Be 0
         @($script:NativeProcessFilePaths).Count | Should Be 0
     }
 

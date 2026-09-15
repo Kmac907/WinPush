@@ -14,6 +14,9 @@ function Invoke-WinPushScript {
         [ValidateSet('Psrp', 'WinRM', 'PsExec')]
         [string] $Transport = 'Psrp',
 
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800,
+
         [AllowNull()]
         [string] $PsExecPath,
 
@@ -127,14 +130,15 @@ function Invoke-WinPushScript {
                         -ScriptPath $resolvedScriptPath `
                         -StagePlan $stagePlan `
                         -Transport $Transport `
-                        -PsExecPath $PsExecPath
+                        -PsExecPath $PsExecPath `
+                        -TimeoutSeconds $TimeoutSeconds
                     $nativeScriptCommand = New-WinPushNativeStagedScriptCommand -RemoteScriptPath $stagePlan.RemoteScriptPath
 
                     $scriptResult = if ($Transport -eq 'WinRM') {
-                        Invoke-WinPushWinRsCommand -ComputerName $target -Command $nativeScriptCommand
+                        Invoke-WinPushWinRsCommand -ComputerName $target -Command $nativeScriptCommand -TimeoutSeconds $TimeoutSeconds
                     }
                     else {
-                        Invoke-WinPushPsExecCommand -ComputerName $target -Command $nativeScriptCommand -PsExecPath $PsExecPath
+                        Invoke-WinPushPsExecCommand -ComputerName $target -Command $nativeScriptCommand -PsExecPath $PsExecPath -TimeoutSeconds $TimeoutSeconds
                     }
 
                     $exitCode = $scriptResult.ExitCode
@@ -168,7 +172,8 @@ function Invoke-WinPushScript {
                             -ComputerName $target `
                             -StagePlan $stagePlan `
                             -Transport $Transport `
-                            -PsExecPath $PsExecPath
+                            -PsExecPath $PsExecPath `
+                            -TimeoutSeconds $TimeoutSeconds
                     }
                     catch {
                         $cleanupError = $_.Exception.Message

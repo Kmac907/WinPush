@@ -5,41 +5,33 @@ function Invoke-WinPushWinRsCommand {
         [string] $ComputerName,
 
         [Parameter(Mandatory)]
-        [string] $Command
+        [string] $Command,
+
+        [ValidateSet('Auto', 'PowerShell', 'Cmd')]
+        [string] $Shell = 'Auto',
+
+        [ValidateRange(0, 2147483647)]
+        [int] $TimeoutSeconds = 1800
     )
+
+    $nativeCommand = switch ($Shell) {
+        'PowerShell' { New-WinPushNativePowerShellEncodedCommand -Command $Command }
+        'Cmd' { 'cmd.exe /d /s /c {0}' -f $Command }
+        default { $Command }
+    }
 
     $nativeResult = Invoke-WinPushNativeProcess `
         -FilePath 'winrs.exe' `
         -ArgumentList @(
             ('-r:{0}' -f $ComputerName)
-            $Command
-        )
+            $nativeCommand
+        ) `
+        -TimeoutSeconds $TimeoutSeconds
 
     [pscustomobject] [ordered] @{
         PSTypeName = 'WinPush.WinRsCommandResult'
         ExitCode   = $nativeResult.ExitCode
-        Output     = @(ConvertTo-WinPushWinRsTextArray -Text $nativeResult.StandardOutput)
-        Errors     = @(ConvertTo-WinPushWinRsTextArray -Text $nativeResult.StandardError)
+        Output     = @(ConvertTo-WinPushNativeTextArray -Text $nativeResult.StandardOutput)
+        Errors     = @(ConvertTo-WinPushNativeTextArray -Text $nativeResult.StandardError)
     }
-}
-
-function ConvertTo-WinPushWinRsTextArray {
-    [CmdletBinding()]
-    param(
-        [AllowNull()]
-        [string] $Text
-    )
-
-    if ([string]::IsNullOrEmpty($Text)) {
-        return @()
-    }
-
-    $normalized = $Text -replace "`r`n", "`n" -replace "`r", "`n"
-    $lines = @($normalized -split "`n")
-
-    if ($lines.Count -gt 0 -and $lines[-1] -eq '') {
-        $lines = @($lines[0..($lines.Count - 2)])
-    }
-
-    return $lines
 }
