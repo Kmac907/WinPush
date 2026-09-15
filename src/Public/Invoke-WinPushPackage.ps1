@@ -439,7 +439,6 @@ function Invoke-WinPushPackage {
                             Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Started'
                         }
 
-                        $previousArtifactError = $result.ArtifactError
                         $result = Add-WinPushExecutionLogArtifact `
                             -Result $result `
                             -Session $session `
@@ -449,10 +448,6 @@ function Invoke-WinPushPackage {
                             Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Completed'
                         }
                         $sharedRunDirectory = $result.RunDirectory
-                        if ($result.ArtifactError -ne $previousArtifactError) {
-                            $artifactError = $result.ArtifactError
-                            $logsEnabled = $false
-                        }
                     }
 
                     $result = Set-WinPushPackageCleanupResult `
@@ -470,7 +465,7 @@ function Invoke-WinPushPackage {
                             -ArtifactIdentity $sourcePreparation.ArtifactIdentity `
                             -RunDirectory $sharedRunDirectory
                         $sharedRunDirectory = $result.RunDirectory
-                        if ($null -ne $captureContext) {
+                        if ($null -ne $captureContext -and [string]::IsNullOrWhiteSpace($result.ArtifactError)) {
                             $result.ArtifactError = $captureContext.ArtifactError
                         }
                         elseif ($result.ArtifactError -ne $previousArtifactError) {
@@ -539,7 +534,6 @@ function Invoke-WinPushPackage {
                             Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Started'
                         }
 
-                        $previousArtifactError = $result.ArtifactError
                         $result = Add-WinPushExecutionLogArtifact `
                             -Result $result `
                             -Session $session `
@@ -549,10 +543,6 @@ function Invoke-WinPushPackage {
                             Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Completed'
                         }
                         $sharedRunDirectory = $result.RunDirectory
-                        if ($result.ArtifactError -ne $previousArtifactError) {
-                            $artifactError = $result.ArtifactError
-                            $logsEnabled = $false
-                        }
                     }
 
                     $result = Set-WinPushPackageCleanupResult `
@@ -570,7 +560,7 @@ function Invoke-WinPushPackage {
                             -ArtifactIdentity $sourcePreparation.ArtifactIdentity `
                             -RunDirectory $sharedRunDirectory
                         $sharedRunDirectory = $result.RunDirectory
-                        if ($null -ne $captureContext) {
+                        if ($null -ne $captureContext -and [string]::IsNullOrWhiteSpace($result.ArtifactError)) {
                             $result.ArtifactError = $captureContext.ArtifactError
                         }
                         elseif ($result.ArtifactError -ne $previousArtifactError) {

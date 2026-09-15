@@ -84,6 +84,7 @@ Describe 'Invoke-WinPushScript' {
         $script:CopiedLogRunDirectories = @()
         $script:CopiedLogComputerDirectories = @()
         $script:LogCopyError = $null
+        $script:LogCopyErrorsByComputerName = @{}
         $script:LogCopyReturnedLogs = $null
         $script:LogCopyReturnedCopiedLogPaths = $null
         $script:NativeProcessFilePaths = @()
@@ -195,6 +196,10 @@ Describe 'Invoke-WinPushScript' {
         $script:CopiedLogRunDirectories += $RunDirectory
         $script:CopiedLogComputerDirectories += $ComputerDirectory
         $script:OperationOrder += ('Logs:{0}' -f $Session.ComputerName)
+
+        if ($script:LogCopyErrorsByComputerName.ContainsKey($ComputerName)) {
+            throw $script:LogCopyErrorsByComputerName[$ComputerName]
+        }
 
         if ($null -ne $script:LogCopyError) {
             throw $script:LogCopyError
@@ -776,6 +781,21 @@ Describe 'Invoke-WinPushScript' {
         $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
         ($script:CopiedLogComputerNames -join ',') | Should Be 'PC-001,PC-002'
         ($script:CopiedLogRemoteDirectories -join ',') | Should Be 'C:\ProgramData\EA\Logs\Install-EA,C:\ProgramData\EA\Logs\Install-EA'
+    }
+
+    It 'isolates a script log source failure to its target' {
+        $script:SessionIdByComputerName = @{
+            'PC-001' = 201
+            'PC-002' = 202
+        }
+        $script:LogCopyErrorsByComputerName['PC-001'] = 'PC-001 log source failed'
+
+        $results = @(Invoke-WinPushScript -ComputerName @('PC-001', 'PC-002') -ScriptPath $script:FixtureScript -Logs -CaptureOutput -OutputRoot $TestDrive)
+
+        $results[0].ArtifactError | Should Be 'PC-001 log source failed'
+        $results[1].ArtifactError | Should BeNullOrEmpty
+        ($script:CopiedLogComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        $results[1].Logs[0].Copied | Should Be $true
     }
 
     It 'copies script-attached logs for pipeline targets' {

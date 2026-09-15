@@ -137,6 +137,7 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:CopiedLogRunDirectories = @()
         $script:CopiedLogComputerDirectories = @()
         $script:LogCopyError = $null
+        $script:LogCopyErrorsByComputerName = @{}
         $script:LogCopyReturnedLogs = $null
         $script:LogCopyReturnedCopiedLogPaths = $null
         $script:CleanupSessions = @()
@@ -277,6 +278,10 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:CopiedLogRunDirectories += $RunDirectory
         $script:CopiedLogComputerDirectories += $ComputerDirectory
         $script:PackageOperationOrder += 'Logs'
+
+        if ($script:LogCopyErrorsByComputerName.ContainsKey($ComputerName)) {
+            throw $script:LogCopyErrorsByComputerName[$ComputerName]
+        }
 
         if ($null -ne $script:LogCopyError) {
             throw $script:LogCopyError
@@ -1304,6 +1309,23 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $results[1].ComputerDirectory | Should Be (Join-Path -Path $results[1].RunDirectory -ChildPath 'PC-002')
         $script:CopiedLogRunDirectories[0] | Should Be $results[0].RunDirectory
         $script:CopiedLogRunDirectories[1] | Should Be $results[0].RunDirectory
+    }
+
+    It 'isolates a package log source failure to its target' {
+        $script:LogCopyErrorsByComputerName['PC-001'] = 'PC-001 log source failed'
+
+        $results = @(Invoke-WinPushPackage `
+                -ComputerName @('PC-001', 'PC-002') `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1' `
+                -Logs `
+                -CaptureOutput `
+                -OutputRoot $TestDrive)
+
+        $results[0].ArtifactError | Should Be 'PC-001 log source failed'
+        $results[1].ArtifactError | Should BeNullOrEmpty
+        ($script:CopiedLogComputerNames -join ',') | Should Be 'PC-001,PC-002'
+        $results[1].Logs[0].Copied | Should Be $true
     }
 
     It 'captures output and copies logs for HostFile package targets under one shared run folder' {

@@ -308,7 +308,6 @@ function Invoke-WinPushScript {
                         $result.ResultPath = $captureContext.ResultPath
                         Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Started'
                     }
-                    $previousArtifactError = $result.ArtifactError
                     $result = Add-WinPushExecutionLogArtifact `
                         -Result $result `
                         -Session $session `
@@ -316,10 +315,6 @@ function Invoke-WinPushScript {
                         -RemoteLogDirectory $remoteLogDirectory
                     if ($null -ne $captureContext) {
                         Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'LogCopy Completed'
-                    }
-                    if ($result.ArtifactError -ne $previousArtifactError) {
-                        $artifactError = $result.ArtifactError
-                        $logsEnabled = $false
                     }
                 }
 
@@ -329,7 +324,7 @@ function Invoke-WinPushScript {
                         -Result $result `
                         -OutputRoot $OutputRoot `
                         -ArtifactIdentity $resolvedScriptPath
-                    if ($null -ne $captureContext) {
+                    if ($null -ne $captureContext -and [string]::IsNullOrWhiteSpace($result.ArtifactError)) {
                         $result.ArtifactError = $captureContext.ArtifactError
                     }
                     elseif ($result.ArtifactError -ne $previousArtifactError) {
