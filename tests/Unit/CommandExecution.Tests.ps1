@@ -49,29 +49,35 @@ function New-TestCredential {
 }
 
 Describe 'Invoke-WinPushPsrpCommand' {
+    BeforeEach {
+        $env:WINPUSH_TEST_SENTINEL = 'present'
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath Env:WINPUSH_TEST_SENTINEL -ErrorAction SilentlyContinue
+    }
+
+    Mock Invoke-Command {
+        param($Session, $ScriptBlock, $ArgumentList)
+
+        $null = $Session
+        $LASTEXITCODE = 0
+        & $ScriptBlock @ArgumentList
+    }
+
     It 'runs Auto commands in the PSRP session and preserves structured output' {
-        function Invoke-Command {
-            param($Session, $ScriptBlock, $ArgumentList)
+        $session = [System.Runtime.Serialization.FormatterServices]::GetUninitializedObject(
+            [System.Management.Automation.Runspaces.PSSession]
+        )
+        $result = Invoke-WinPushPsrpCommand `
+            -Session $session `
+            -Shell Auto `
+            -Command '[pscustomobject]@{ Marker = $env:WINPUSH_TEST_SENTINEL; Count = 2 }'
 
-            & $ScriptBlock @ArgumentList
-        }
-
-        $global:WinPushSentinel = 'present'
-
-        try {
-            $result = Invoke-WinPushPsrpCommand `
-                -Session ([pscustomobject] @{ Id = 1 }) `
-                -Shell Auto `
-                -Command '[pscustomobject]@{ Marker = $global:WinPushSentinel; Count = 2 }'
-
-            $result.ExitCode | Should Be 0
-            @($result.Output).Count | Should Be 1
-            $result.Output[0].Marker | Should Be 'present'
-            $result.Output[0].Count | Should Be 2
-        }
-        finally {
-            Remove-Variable -Name WinPushSentinel -Scope Global
-        }
+        $result.ExitCode | Should Be 0
+        @($result.Output).Count | Should Be 1
+        $result.Output[0].Marker | Should Be 'present'
+        $result.Output[0].Count | Should Be 2
     }
 }
 
