@@ -31,7 +31,7 @@ function Test-WinPushPackageAbsoluteWindowsPath {
         if (($component.Length -eq 0 -and $index -ne ($components.Count - 1)) -or
             $component -match '[<>:"/\\|?*\x00-\x1F]' -or
             $component -match '[ .]$' -or
-            $component -match '^(?:\.|\.\.|CON|PRN|AUX|NUL|COM[1-9\u00B9\u00B2\u00B3]|LPT[1-9\u00B9\u00B2\u00B3])(?:\..*)?$') {
+            $component -match '^(?:\.{1,2}|(?:CON|PRN|AUX|NUL|COM[1-9\u00B9\u00B2\u00B3]|LPT[1-9\u00B9\u00B2\u00B3])(?:\..*)?)$') {
             return $false
         }
     }
