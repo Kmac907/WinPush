@@ -34,6 +34,9 @@ Describe 'Artifact infrastructure' {
 
     It 'leaves safe target names unchanged' {
         ConvertTo-WinPushArtifactTargetName -ComputerName 'safe-host.example' | Should Be 'safe-host.example'
+
+        $boundaryName = 'a' * 255
+        ConvertTo-WinPushArtifactTargetName -ComputerName $boundaryName | Should Be $boundaryName
     }
 
     It 'sanitizes unsafe and reserved target names with deterministic SHA-256 suffixes' {
@@ -41,6 +44,37 @@ Describe 'Artifact infrastructure' {
         ConvertTo-WinPushArtifactTargetName -ComputerName 'fe80::1' | Should Be 'fe80__1-6d6dc150'
         ConvertTo-WinPushArtifactTargetName -ComputerName 'CON' | Should Be 'CON-a3dbc4b6'
         ConvertTo-WinPushArtifactTargetName -ComputerName 'bad/name' | Should Match '^bad_name-[0-9a-f]{8}$'
+    }
+
+    It 'truncates overlong safe and unsafe names to valid component lengths' {
+        foreach ($computerName in @(('b' * 256), (('c' * 255) + ':'))) {
+            $targetName = ConvertTo-WinPushArtifactTargetName -ComputerName $computerName
+
+            $targetName.Length | Should Be 255
+            $targetName | Should Match '^[bc]{246}-[0-9a-f]{8}$'
+        }
+    }
+
+    It 'uses the truncated tail when hashing otherwise identical prefixes' {
+        $prefix = 'd' * 246
+        $first = ConvertTo-WinPushArtifactTargetName -ComputerName ($prefix + 'tail-alpha')
+        $second = ConvertTo-WinPushArtifactTargetName -ComputerName ($prefix + 'tail-bravo')
+
+        $first.Substring(0, 246) | Should Be $second.Substring(0, 246)
+        $first | Should Not Be $second
+    }
+
+    It 'sanitizes superscript COM and LPT reserved names case-insensitively with extensions' {
+        foreach ($deviceName in @('COM', 'LPT')) {
+            foreach ($superscript in @([char] 0x00b9, [char] 0x00b2, [char] 0x00b3)) {
+                $reservedName = $deviceName + $superscript
+                foreach ($computerName in @($reservedName, ($reservedName.ToLowerInvariant() + '.txt'))) {
+                    $targetName = ConvertTo-WinPushArtifactTargetName -ComputerName $computerName
+                    $expectedPrefix = $computerName.Replace('.', '_')
+                    $targetName | Should Match ('^{0}-[0-9a-f]{{8}}$' -f [regex]::Escape($expectedPrefix))
+                }
+            }
+        }
     }
 
     It 'contains traversal-like target artifacts and preserves the original ComputerName' {

@@ -19,20 +19,26 @@ function ConvertTo-WinPushArtifactTargetName {
     )
 
     $invalidNamePattern = '[\x00-\x1f<>:"/\\|?*]'
-    $reservedNamePattern = '^(?i:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)'
+    $reservedNamePattern = '^(?i:con|prn|aux|nul|com[1-9\u00b9\u00b2\u00b3]|lpt[1-9\u00b9\u00b2\u00b3])(?:\.|$)'
     $isUnsafe = $ComputerName -match $invalidNamePattern -or
         $ComputerName -match '[ .]$' -or
         $ComputerName -eq '.' -or
         $ComputerName -eq '..' -or
         $ComputerName -match $reservedNamePattern
 
-    if (-not $isUnsafe) {
+    if (-not $isUnsafe -and $ComputerName.Length -le 255) {
         return $ComputerName
     }
 
     $stem = ([regex]::Replace($ComputerName, $invalidNamePattern, '_')).TrimEnd([char[]] @(' ', '.'))
+    if ($ComputerName -match $reservedNamePattern) {
+        $stem = $stem.Replace('.', '_')
+    }
     if ([string]::IsNullOrWhiteSpace($stem) -or $stem -eq '.' -or $stem -eq '..') {
         $stem = 'target'
+    }
+    elseif ($stem.Length -gt 246) {
+        $stem = $stem.Substring(0, 246)
     }
 
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
