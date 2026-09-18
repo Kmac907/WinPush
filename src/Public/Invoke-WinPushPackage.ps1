@@ -580,12 +580,21 @@ function Invoke-WinPushPackage {
         }
         finally {
             if ($null -ne $cachePlan -and (Test-Path -LiteralPath $cachePlan.CacheDirectory)) {
-                if ($null -ne $captureContext) {
-                    Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Cleanup Started' -RootOnly
+                try {
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Cleanup Started' -RootOnly
+                    }
+                    Remove-Item -LiteralPath $cachePlan.CacheDirectory -Recurse -Force -ErrorAction Stop
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Cleanup Completed' -RootOnly
+                    }
                 }
-                Remove-Item -LiteralPath $cachePlan.CacheDirectory -Recurse -Force -ErrorAction SilentlyContinue
-                if ($null -ne $captureContext) {
-                    Write-WinPushCaptureRecord -Context $captureContext -Type Stage -Value 'Cleanup Completed' -RootOnly
+                catch {
+                    $cacheCleanupError = "Failed to remove URI package cache directory '$($cachePlan.CacheDirectory)': $($_.Exception.Message)"
+                    if ($null -ne $captureContext) {
+                        Write-WinPushCaptureRecord -Context $captureContext -Type Error -Value $cacheCleanupError -RootOnly
+                    }
+                    Write-Error -Message $cacheCleanupError -Category WriteError -TargetObject $cachePlan.CacheDirectory -ErrorAction Continue
                 }
             }
         }

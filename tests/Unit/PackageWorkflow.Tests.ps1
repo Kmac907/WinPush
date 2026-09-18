@@ -146,6 +146,8 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:CleanupError = $null
         $script:DownloadUris = @()
         $script:DownloadOutFiles = @()
+        $script:CacheRemoveCalls = @()
+        $script:CacheRemoveError = $null
         $script:RemovedSessionIds = @()
         $script:SessionToReturn = [System.Runtime.Serialization.FormatterServices]::GetUninitializedObject(
             [System.Management.Automation.Runspaces.PSSession]
@@ -371,6 +373,27 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         }
 
         Set-Content -LiteralPath $OutFile -Value 'downloaded package' -Encoding utf8NoBOM
+    }
+
+    Mock Remove-Item {
+        param(
+            [string] $LiteralPath,
+            [switch] $Recurse,
+            [switch] $Force,
+            $ErrorAction
+        )
+
+        $script:CacheRemoveCalls += [pscustomobject] @{
+            LiteralPath = $LiteralPath
+            Recurse     = $Recurse
+            Force       = $Force
+            ErrorAction = $ErrorAction
+        }
+        if ($null -ne $script:CacheRemoveError) {
+            throw $script:CacheRemoveError
+        }
+
+        [System.IO.Directory]::Delete($LiteralPath, $true)
     }
 
     Mock Remove-PSSession {
@@ -1545,6 +1568,46 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         (Split-Path -Path $script:DownloadOutFiles[0] -Parent) | Should Not Be (Split-Path -Path $script:DownloadOutFiles[1] -Parent)
         Test-Path -LiteralPath (Split-Path -Path $script:DownloadOutFiles[0] -Parent) | Should Be $false
         Test-Path -LiteralPath (Split-Path -Path $script:DownloadOutFiles[1] -Parent) | Should Be $false
+        @($script:CacheRemoveCalls).Count | Should Be 2
+        $script:CacheRemoveCalls[0].ErrorAction | Should Be 'Stop'
+        $script:CacheRemoveCalls[1].ErrorAction | Should Be 'Stop'
+    }
+
+    It 'reports a URI cache deletion failure without changing the package result or claiming cleanup completed' {
+        $cacheRoot = Join-Path -Path $TestDrive -ChildPath 'LockedPackageCache'
+        $outputRoot = Join-Path -Path $TestDrive -ChildPath 'LockedPackageCacheArtifacts'
+        $cleanupErrors = @()
+        $script:CacheRemoveError = 'cache directory is locked'
+
+        $result = Invoke-WinPushPackage `
+            -ComputerName 'PC-001' `
+            -Uri 'https://storage.contoso.example/packages/EA.zip' `
+            -EntryPoint '.\Install-EA.ps1' `
+            -PackageCacheRoot $cacheRoot `
+            -CaptureOutput `
+            -OutputRoot $outputRoot `
+            -ErrorVariable +cleanupErrors
+
+        $cacheDirectory = Split-Path -Path $script:DownloadOutFiles[0] -Parent
+        $result.Succeeded | Should Be $true
+        $result.ExitCode | Should Be 0
+        $result.Output[0] | Should Be 'package output'
+        @($result.Errors).Count | Should Be 0
+        $cacheCleanupError = @($cleanupErrors | ForEach-Object { [string] $_ } | Where-Object { $_ -match 'Failed to remove URI package cache directory' })
+        @($cacheCleanupError).Count | Should Be 1
+        $cacheCleanupError[0] | Should Match ([regex]::Escape($cacheDirectory))
+        $cacheCleanupError[0] | Should Match ([regex]::Escape('cache directory is locked'))
+        @($script:CacheRemoveCalls).Count | Should Be 1
+        $script:CacheRemoveCalls[0].LiteralPath | Should Be $cacheDirectory
+        $script:CacheRemoveCalls[0].Recurse | Should Be $true
+        $script:CacheRemoveCalls[0].Force | Should Be $true
+        $script:CacheRemoveCalls[0].ErrorAction | Should Be 'Stop'
+
+        $runLog = Get-Content -LiteralPath (Join-Path -Path $result.RunDirectory -ChildPath 'run.log') -Raw
+        $runLog | Should Match ([regex]::Escape('Cleanup Started'))
+        $runLog | Should Match ([regex]::Escape($cacheDirectory))
+        $runLog | Should Match ([regex]::Escape('cache directory is locked'))
+        $runLog | Should Not Match ([regex]::Escape('Cleanup Completed'))
     }
 
     It 'downloads one URI package to the admin workstation cache, stages it to one target, and returns package metadata' {
