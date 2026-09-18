@@ -248,11 +248,11 @@ function Write-WinPushSummaryArtifact {
     }
 
     if (Test-Path -LiteralPath $SummaryPath -PathType Leaf) {
-        $row | Export-Csv -LiteralPath $SummaryPath -NoTypeInformation -Append
+        $row | Export-Csv -LiteralPath $SummaryPath -NoTypeInformation -Encoding UTF8 -Append
         return
     }
 
-    $row | Export-Csv -LiteralPath $SummaryPath -NoTypeInformation
+    $row | Export-Csv -LiteralPath $SummaryPath -NoTypeInformation -Encoding UTF8
 }
 
 function Write-WinPushCommandOutputArtifact {

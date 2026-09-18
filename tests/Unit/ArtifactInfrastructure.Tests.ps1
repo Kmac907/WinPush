@@ -123,14 +123,16 @@ Describe 'Artifact infrastructure' {
             Should Be '{"Name":"root","Child":{"Level2":{"Level3":{"Value":"deep"}}}}'
     }
 
-    It 'appends complete rows to an existing summary' {
+    It 'creates and appends complete Unicode summary rows' {
         $runDirectory = Join-Path -Path $TestDrive -ChildPath 'SharedRun'
         [System.IO.Directory]::CreateDirectory($runDirectory) | Out-Null
+        $createdComputerName = 'PC-M{0}nchen' -f [char] 0x00FC
+        $appendedComputerName = 'PC-Z{0}rich' -f [char] 0x00FC
 
         Write-WinPushCommandOutputArtifact `
             -OutputRoot $TestDrive `
             -RunDirectory $runDirectory `
-            -ComputerName 'PC-001' `
+            -ComputerName $createdComputerName `
             -Operation 'RunCommand' `
             -Transport 'Psrp' `
             -Succeeded $true `
@@ -138,7 +140,7 @@ Describe 'Artifact infrastructure' {
         Write-WinPushCommandOutputArtifact `
             -OutputRoot $TestDrive `
             -RunDirectory $runDirectory `
-            -ComputerName 'PC-002' `
+            -ComputerName $appendedComputerName `
             -Operation 'RunCommand' `
             -Transport 'Psrp' `
             -Succeeded $false `
@@ -147,12 +149,12 @@ Describe 'Artifact infrastructure' {
 
         $rows = @(Import-Csv -LiteralPath (Join-Path -Path $runDirectory -ChildPath 'summary.csv'))
         @($rows).Count | Should Be 2
-        ($rows.ComputerName -join ',') | Should Be 'PC-001,PC-002'
+        ($rows.ComputerName -join ',') | Should Be ($createdComputerName, $appendedComputerName -join ',')
         $rows[1].Operation | Should Be 'RunCommand'
         $rows[1].Transport | Should Be 'Psrp'
         $rows[1].Succeeded | Should Be 'False'
         $rows[1].ExitCode | Should Be '1'
         $rows[1].ErrorMessage | Should Be 'failed'
-        $rows[1].ResultPath | Should Match 'PC-002\\run.log$'
+        $rows[1].ResultPath | Should Match 'PC-Z.rich\\run.log$'
     }
 }
