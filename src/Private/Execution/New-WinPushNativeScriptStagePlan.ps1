@@ -264,7 +264,7 @@ else {
     } while (-not `$exited -and `$remainingMilliseconds -gt 0)
 }
 if (-not `$exited) {
-    `$process.Kill()
+    & taskkill.exe /PID `$process.Id /T /F | Out-Null
     `$process.WaitForExit()
     [Console]::Error.WriteLine('Process timed out after $TimeoutSeconds seconds.')
     exit 124

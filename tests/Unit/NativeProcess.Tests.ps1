@@ -20,19 +20,21 @@ Describe 'Invoke-WinPushNativeProcess' {
         ($result.StandardError -join ',') | Should Be 'error one'
     }
 
-    It 'times out, retains received streams, and kills the descendant process' {
+    It 'times out, retains received streams, and kills the process tree' {
         $childCommand = 'Start-Sleep -Seconds 60'
-        $command = '$child = Start-Process -FilePath "{0}" -ArgumentList @(''-NoProfile'', ''-Command'', ''{1}'') -PassThru; [Console]::Out.WriteLine("before timeout"); [Console]::Out.WriteLine($child.Id); [Console]::Error.WriteLine("early error"); Start-Sleep -Seconds 60' -f $script:PowerShellPath, $childCommand
+        $command = '$child = Start-Process -FilePath "{0}" -ArgumentList @(''-NoProfile'', ''-Command'', ''{1}'') -PassThru; [Console]::Out.WriteLine("before timeout"); [Console]::Out.WriteLine($PID); [Console]::Out.WriteLine($child.Id); [Console]::Error.WriteLine("early error"); Start-Sleep -Seconds 60' -f $script:PowerShellPath, $childCommand
 
         $result = Invoke-WinPushNativeProcess -FilePath $script:PowerShellPath -ArgumentList @('-NoProfile', '-Command', $command) -TimeoutSeconds 1
 
-        $childId = [int] $result.StandardOutput[1]
+        $parentId = [int] $result.StandardOutput[1]
+        $childId = [int] $result.StandardOutput[2]
         $result.Succeeded | Should Be $false
         $result.TimedOut | Should Be $true
         $result.ExitCode | Should Be 124
         $result.StandardOutput[0] | Should Be 'before timeout'
         $result.StandardError[0] | Should Be 'Process timed out after 1 seconds.'
         $result.StandardError[1] | Should Be 'early error'
+        $null -eq (Get-Process -Id $parentId -ErrorAction SilentlyContinue) | Should Be $true
         $null -eq (Get-Process -Id $childId -ErrorAction SilentlyContinue) | Should Be $true
     }
 

@@ -456,6 +456,7 @@ Describe 'PSRP remediation timeouts' {
             -TimeoutSeconds 12 | Out-Null
 
         $script:WrapperCommand | Should Match '\[long\] 12 \* 1000'
+        $script:WrapperCommand | Should Match 'taskkill\.exe /PID \$process\.Id /T /F'
         $script:WrapperCommand | Should Match 'exit 124'
         $script:WrapperCommand | Should Match 'exit \$process\.ExitCode'
     }
