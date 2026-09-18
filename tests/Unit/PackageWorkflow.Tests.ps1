@@ -1402,8 +1402,44 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
         $script:PackageExecutionArgumentLists[0][3] | Should Be 42
     }
 
-    It 'rejects non-absolute Windows remote stage roots before download or session creation' {
-        foreach ($invalidRoot in @('relative\stage', '\rooted-only', 'C:drive-relative', '/unix/root', '\\.\pipe\stage', '\\?\C:\stage')) {
+    It 'rejects invalid Windows remote stage roots before download or remote work' {
+        foreach ($invalidRoot in @(
+                'relative\stage',
+                '\rooted-only',
+                'C:drive-relative',
+                '/unix/root',
+                'C:/Stage',
+                '\\server/share/Stage',
+                '\\.\pipe\stage',
+                '\\?\C:\stage',
+                '\\server',
+                '\\server\',
+                '\\server\\share',
+                'C:\Stage\\Child',
+                '\\server\share\\Stage',
+                ('C:\Stage' + [char] 10),
+                ('C:\Stage' + [char] 0),
+                ('C:\Stage' + [char] 9),
+                ('\\server\share\Stage' + [char] 10),
+                'C:\Stage:stream',
+                'C:\Stage*',
+                'C:\Stage?',
+                'C:\Stage<',
+                'C:\Stage>',
+                'C:\Stage"',
+                'C:\Stage|',
+                'C:\Stage.',
+                'C:\Stage ',
+                'C:\.\Stage',
+                'C:\..\Stage',
+                'C:\CON',
+                ('C:\COM' + [char] 0xB9),
+                ('C:\COM' + [char] 0xB2 + '.txt'),
+                ('C:\COM' + [char] 0xB3),
+                ('C:\LPT' + [char] 0xB9),
+                ('C:\LPT' + [char] 0xB2 + '.txt'),
+                ('C:\LPT' + [char] 0xB3)
+            )) {
             {
                 Invoke-WinPushPackage `
                     -ComputerName 'PC-001' `
@@ -1415,24 +1451,29 @@ Describe 'Invoke-WinPushPackage local package preparation and staging' {
 
         @($script:DownloadUris).Count | Should Be 0
         @($script:NewPSSessionComputerNames).Count | Should Be 0
+        @($script:RemoteDirectoriesCreated).Count | Should Be 0
+        @($script:CopiedDestinations).Count | Should Be 0
+        @($script:PackageExecutionSessions).Count | Should Be 0
     }
 
     It 'accepts drive-rooted and UNC remote stage roots' {
-        $driveResult = Invoke-WinPushPackage `
-            -ComputerName 'PC-001' `
-            -Path $script:FixtureScriptPackage `
-            -EntryPoint '.\Install-EA.ps1' `
-            -RemoteStageRoot 'D:\WinPushStage'
-        $uncResult = Invoke-WinPushPackage `
-            -ComputerName 'PC-002' `
-            -Path $script:FixtureScriptPackage `
-            -EntryPoint '.\Install-EA.ps1' `
-            -RemoteStageRoot '\\server\share\WinPushStage'
+        $validRoots = @('C:\', 'C:\Stage', '\\server\share', '\\server\share\Stage')
 
-        $driveResult.Succeeded | Should Be $true
-        $uncResult.Succeeded | Should Be $true
-        $script:RemoteDirectoriesCreated[0] | Should Match '^D:\\WinPushStage\\package-'
-        $script:RemoteDirectoriesCreated[1] | Should Match '^\\\\server\\share\\WinPushStage\\package-'
+        foreach ($validRoot in $validRoots) {
+            $result = Invoke-WinPushPackage `
+                -ComputerName 'PC-001' `
+                -Path $script:FixtureScriptPackage `
+                -EntryPoint '.\Install-EA.ps1' `
+                -RemoteStageRoot $validRoot
+
+            $result.Succeeded | Should Be $true
+        }
+
+        @($script:RemoteDirectoriesCreated).Count | Should Be 4
+        $script:RemoteDirectoriesCreated[0] | Should Match '^C:\\package-'
+        $script:RemoteDirectoriesCreated[1] | Should Match '^C:\\Stage\\package-'
+        $script:RemoteDirectoriesCreated[2] | Should Match '^\\\\server\\share\\package-'
+        $script:RemoteDirectoriesCreated[3] | Should Match '^\\\\server\\share\\Stage\\package-'
     }
 
     It 'rejects non-HTTPS URI package sources before download or session creation' {

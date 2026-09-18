@@ -5,10 +5,38 @@ function Test-WinPushPackageAbsoluteWindowsPath {
         [string] $Path
     )
 
-    -not [string]::IsNullOrWhiteSpace($Path) -and
-        -not $Path.Contains('/') -and
-        $Path -notmatch '^\\\\[.?]\\' -and
-        ($Path -match '^[A-Za-z]:\\' -or $Path -match '^\\\\[^\\]+\\[^\\]+(?:\\|$)')
+    if ([string]::IsNullOrWhiteSpace($Path) -or $Path.Contains('/') -or $Path -match '^\\\\[.?]\\') {
+        return $false
+    }
+
+    if ($Path.Length -ge 3 -and $Path[1] -eq ':' -and $Path[2] -eq '\') {
+        $components = @($Path.Substring(3) -split '\\', 0)
+    }
+    elseif ($Path.StartsWith('\\')) {
+        if ($Path.Length -ge 4 -and ($Path[2] -eq '.' -or $Path[2] -eq '?') -and $Path[3] -eq '\') {
+            return $false
+        }
+
+        $components = @($Path.Substring(2) -split '\\', 0)
+        if ($components.Count -lt 2 -or [string]::IsNullOrEmpty($components[0]) -or [string]::IsNullOrEmpty($components[1])) {
+            return $false
+        }
+    }
+    else {
+        return $false
+    }
+
+    for ($index = 0; $index -lt $components.Count; $index++) {
+        $component = $components[$index]
+        if (($component.Length -eq 0 -and $index -ne ($components.Count - 1)) -or
+            $component -match '[<>:"/\\|?*\x00-\x1F]' -or
+            $component -match '[ .]$' -or
+            $component -match '^(?:\.|\.\.|CON|PRN|AUX|NUL|COM[1-9\u00B9\u00B2\u00B3]|LPT[1-9\u00B9\u00B2\u00B3])(?:\..*)?$') {
+            return $false
+        }
+    }
+
+    return $true
 }
 
 function New-WinPushPackageStagePlan {
