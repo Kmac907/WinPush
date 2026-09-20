@@ -1,0 +1,88 @@
+name: Release WinPush
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semantic version component to increment
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+concurrency:
+  group: winpush-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Increment module version
+        id: version
+        shell: pwsh
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          $manifestPath = './WinPush.psd1'
+          $currentVersion = [version] (Import-PowerShellDataFile -Path $manifestPath).ModuleVersion
+          $version = switch ($env:BUMP) {
+            'major' { [version]::new($currentVersion.Major + 1, 0, 0) }
+            'minor' { [version]::new($currentVersion.Major, $currentVersion.Minor + 1, 0) }
+            'patch' { [version]::new($currentVersion.Major, $currentVersion.Minor, $currentVersion.Build + 1) }
+          }
+
+          $content = Get-Content -LiteralPath $manifestPath -Raw
+          $pattern = "(?m)^(\s*ModuleVersion\s*=\s*)'$([regex]::Escape($currentVersion.ToString()))'"
+          $regex = [regex]::new($pattern)
+          if ($regex.Matches($content).Count -ne 1) {
+            throw 'Could not uniquely locate ModuleVersion in WinPush.psd1.'
+          }
+
+          $updatedContent = $regex.Replace($content, '${1}' + "'$version'", 1)
+          Set-Content -LiteralPath $manifestPath -Value $updatedContent -NoNewline
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Package module
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $modulePath = New-Item -Path './dist/WinPush' -ItemType Directory -Force
+          Copy-Item -LiteralPath './WinPush.psd1', './WinPush.psm1', './WinPush.format.ps1xml' -Destination $modulePath
+          Copy-Item -LiteralPath './src' -Destination $modulePath -Recurse
+          Compress-Archive -LiteralPath $modulePath -DestinationPath "./dist/WinPush-$env:VERSION.zip"
+
+      - name: Commit and tag version
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "Tag v${VERSION} already exists." >&2
+            exit 1
+          fi
+          git add WinPush.psd1
+          git commit -m "Release v${VERSION}"
+          git tag -a "v${VERSION}" -m "WinPush v${VERSION}"
+          git push --atomic origin HEAD:main "refs/tags/v${VERSION}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release create "v${VERSION}" "dist/WinPush-${VERSION}.zip" --verify-tag --generate-notes --title "WinPush v${VERSION}"
