@@ -2,15 +2,11 @@
 
 ## Installation Scope
 
-WinPush is installed with `-Scope AllUsers` only. Run installation and updates from an elevated PowerShell 7 session.
+WinPush is currently distributed from source and can be imported directly from a clone of the repository.
 
 ## Package Versions
 
-Published package versions are immutable in Azure Artifacts. Installing with `-Reinstall` refreshes the same published version only; it does not make Azure Artifacts replace an existing package version with new contents.
-
-The source `ModuleVersion` in `WinPush.psd1` tracks the human-managed release line as `major.minor.0`. CI replaces only the patch number with the Azure DevOps build ID in the staged package before publishing.
-
-The source manifest version must stay in `major.minor.0` form. The CI package step keeps `major.minor` from the source manifest and writes the Azure DevOps build ID as the package patch version in the staged manifest only.
+The source `ModuleVersion` in `WinPush.psd1` is managed manually. Automated package publishing is not currently configured.
 
 ## Manifest Package Metadata
 
@@ -20,6 +16,7 @@ The module manifest includes package metadata required by PSResourceGet packagin
 - `FormatsToProcess`
 - `PrivateData.PSData.Tags`
 - `PrivateData.PSData.ProjectUri`
+- `PrivateData.PSData.LicenseUri`
 
 `ProjectUri` must not be empty. Empty package metadata can cause `Compress-PSResource` to fail during CI packaging. Files declared by manifest paths must be included in the staged package root before `Compress-PSResource` runs.
 
@@ -36,29 +33,27 @@ Import-PowerShellDataFile (Join-Path $Module.ModuleBase 'WinPush.psd1') |
 Test-Path (Join-Path $Module.ModuleBase 'WinPush.format.ps1xml')
 ```
 
-## Repository Installation
+## Source Installation
 
-For repository-based installation, use the shared installer tool from the `Tools` repository:
+Clone and import the module:
 
-```powershell
-Install-EndpointEngineeringModule -ModuleName WinPush -Force
+```text
+git clone https://github.com/Kmac907/WinPush.git
 ```
 
-`Install-EndpointEngineeringModule` must be available in the current PowerShell session before running this command. Follow the README under `Tools/Install-EndpointEngineeringModule` for that tool.
+```powershell
+Import-Module .\WinPush\WinPush.psd1 -Force
+```
 
 ## Rollback Or Recovery
 
-To remove a PSResourceGet installation:
+To unload the module from the current session:
 
 ```powershell
-Uninstall-PSResource -Name WinPush -Scope AllUsers
+Remove-Module WinPush
 ```
 
-For Windows PowerShell 5.1, also check:
-
-```text
-Documents\WindowsPowerShell\Modules\WinPush
-```
+Delete the cloned directory when it is no longer needed.
 
 Additional cleanup:
 

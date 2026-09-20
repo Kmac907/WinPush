@@ -69,63 +69,25 @@ Notes:
 
 ## Install
 
-Published modules are installed from the private `SCFModules` Azure Artifacts NuGet feed.
+WinPush is currently distributed from source. Clone the repository:
 
-Register the repository once per machine from an elevated PowerShell 7 session:
-
-```powershell
-$FeedUri = 'https://pkgs.dev.azure.com/scfitops/_packaging/SCFModules/nuget/v3/index.json'
-
-Install-Module Microsoft.PowerShell.PSResourceGet -Scope AllUsers -Force -AllowClobber
-
-Register-PSResourceRepository `
-    -Name SCFModules `
-    -Uri $FeedUri `
-    -Trusted `
-    -ApiVersion V3 `
-    -Force
+```text
+git clone https://github.com/Kmac907/WinPush.git
 ```
 
-Install WinPush for all users:
+Import the module from the cloned directory:
 
 ```powershell
-Install-PSResource `
-    -Name WinPush `
-    -Repository SCFModules `
-    -Scope AllUsers
-```
-
-If Azure DevOps authentication fails with `401 Unauthorized`, pass a credential created from a PAT with `Packaging: Read`:
-
-```powershell
-$Pat = Read-Host 'Azure DevOps PAT' -AsSecureString
-$Credential = [pscredential]::new('AzureDevOps', $Pat)
-
-Install-PSResource `
-    -Name WinPush `
-    -Repository SCFModules `
-    -Scope AllUsers `
-    -Credential $Credential
-```
-
-Verify installation:
-
-```powershell
-Get-Module -ListAvailable WinPush |
-    Select-Object Name, Version, ModuleBase
-
-Get-InstalledPSResource -Name WinPush -Scope AllUsers
+Import-Module .\WinPush\WinPush.psd1 -Force
 Get-Command -Module WinPush
 ```
 
-For local development from this module folder:
+From the repository root, use:
 
 ```powershell
 Import-Module .\WinPush.psd1 -Force
 Get-Command -Module WinPush
 ```
-
-WinPush is installed with `-Scope AllUsers` only. Run installation and updates from an elevated PowerShell 7 session.
 
 ## Quickstart
 
@@ -288,7 +250,6 @@ Run names include a timestamp and GUID so concurrent runs cannot collide. Unsafe
 - Windows controller
 - Windows targets reachable over WinRM/PSRP
 - current Windows identity or supplied `PSCredential` authorized on the target
-- Azure DevOps feed read access when installing from `SCFModules`
 - target-side permissions for the requested command, script, file copy, or log retrieval operation
 - elevated PowerShell when using WinRM or PsExec native transports
 - PsExec available locally when using `-Transport PsExec`; WinPush invokes it with `-h` so the remote process uses an elevated token when available
@@ -302,7 +263,7 @@ Run the offline quality gate from this module folder:
 .\build\build.ps1
 ```
 
-The gate validates the manifest, imports the module, runs PSScriptAnalyzer, runs the 345-test offline baseline with Pester 3.4.0, and writes CI-readable test and coverage artifacts under `artifacts\build`. The enforced command-coverage minimum is 82.09 percent; the build fails below it. Live targets are opt-in, so the default gate remains offline.
+The gate validates the manifest, imports the module, runs PSScriptAnalyzer, runs the 451-test offline baseline with Pester 3.4.0, and writes test and coverage artifacts under `artifacts\build`. The enforced command-coverage minimum is 82.09 percent; the build fails below it. Live targets are opt-in, so the default gate remains offline.
 
 Install and retain the exact test dependency:
 
