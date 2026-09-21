@@ -220,18 +220,15 @@ function Install-WinPushRelease {
 function Start-WinPushInstaller {
     [CmdletBinding()]
     param(
-        [ValidateSet('CurrentUser', 'AllUsers')]
-        [string] $Scope,
-
-        [switch] $Prompt
+        [string] $Scope
     )
 
-    if ($Prompt) {
+    if ([string]::IsNullOrWhiteSpace($Scope)) {
         $Scope = Select-WinPushInstallScope
     }
     Install-WinPushRelease -Scope $Scope
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    Start-WinPushInstaller -Scope $Scope -Prompt:(-not $PSBoundParameters.ContainsKey('Scope'))
+    Start-WinPushInstaller -Scope $Scope
 }

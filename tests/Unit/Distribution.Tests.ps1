@@ -139,6 +139,16 @@ Describe 'WinPush installer scope selection' {
         Assert-MockCalled Install-WinPushRelease -Times 1 -Exactly -Scope It -ParameterFilter { $Scope -eq 'AllUsers' }
     }
 
+    It 'prompts before validating a blank scope from Invoke-Expression' {
+        Mock Select-WinPushInstallScope { 'CurrentUser' }
+        Mock Install-WinPushRelease {}
+
+        Start-WinPushInstaller -Scope ''
+
+        Assert-MockCalled Select-WinPushInstallScope -Times 1 -Exactly -Scope It
+        Assert-MockCalled Install-WinPushRelease -Times 1 -Exactly -Scope It -ParameterFilter { $Scope -eq 'CurrentUser' }
+    }
+
     It 'resolves redirected Documents and Program Files module roots' {
         Get-WinPushInstallRoot -Scope CurrentUser -DocumentsPath 'D:\Profiles\Operator\Documents' -ProgramFilesPath 'E:\Programs' |
             Should Be 'D:\Profiles\Operator\Documents\PowerShell\Modules\WinPush'
