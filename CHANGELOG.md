@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Refreshed repository documentation and added native help for every exported command.
+- Added versioned GitHub Release ZIP packaging with staged manifest validation.
+- Added an interactive, scope-aware installer that verifies GitHub's SHA-256 asset digest and installs module versions side by side.
+- Made release installation the primary setup path and moved clone-based setup into development documentation.
 
 ## 0.2.0
 

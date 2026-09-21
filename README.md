@@ -46,30 +46,33 @@ WinPush intentionally does not implement automatic transport configuration, cred
 
 ## Install
 
-Clone the repository:
-
-```text
-git clone https://github.com/Kmac907/WinPush.git
-```
-
-Import the module from the cloned directory:
+Run the interactive installer and choose `CurrentUser` or `AllUsers`:
 
 ```powershell
-Import-Module .\WinPush\WinPush.psd1 -Force
-Get-Command -Module WinPush
+irm https://raw.githubusercontent.com/Kmac907/WinPush/main/install.ps1 | iex
 ```
 
-From the repository root, use:
+`AllUsers` requires an elevated PowerShell session. To inspect the mutable installer before running it:
 
 ```powershell
-Import-Module .\WinPush.psd1 -Force
-Get-Command -Module WinPush
+irm https://raw.githubusercontent.com/Kmac907/WinPush/main/install.ps1 -OutFile install.ps1
+Get-Content .\install.ps1
+.\install.ps1
 ```
+
+When the script is saved locally, automation can bypass the prompt:
+
+```powershell
+.\install.ps1 -Scope CurrentUser
+.\install.ps1 -Scope AllUsers
+```
+
+The installer verifies the release ZIP against GitHub's SHA-256 asset digest before installing it. Inspecting `install.ps1` separately avoids blindly executing mutable code from the repository's `main` branch. Clone-based setup is documented in the [development guide](docs/development.md#local-development).
 
 ## First command
 
 ```powershell
-Import-Module .\WinPush.psd1 -Force
+Import-Module WinPush
 Invoke-WinPushCommand -ComputerName PC01 -Command 'whoami'
 ```
 
@@ -158,6 +161,7 @@ Run the offline quality gate from the repository root:
 
 ```powershell
 .\build\build.ps1
+.\build\package.ps1
 ```
 
 The gate validates the manifest, imports the module, runs PSScriptAnalyzer, runs the offline Pester 3.4.0 suite, enforces the coverage threshold defined in build configuration, and writes results under `artifacts\build`. See the [development guide](docs/development.md) for prerequisites, optional live checks, packaging, and releases.

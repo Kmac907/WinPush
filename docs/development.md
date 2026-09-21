@@ -22,6 +22,7 @@ WinPush/
 |-- CHANGELOG.md
 |-- LICENSE
 |-- SECURITY.md
+|-- install.ps1
 |-- WinPush.psd1
 |-- WinPush.psm1
 |-- WinPush.format.ps1xml
@@ -34,14 +35,24 @@ WinPush/
 |   |-- Integration/
 |   `-- Unit/
 `-- build/
-    `-- build.ps1
+    |-- build.ps1
+    `-- package.ps1
 ```
 
 `WinPush.psd1` and `WinPush.psm1` are the normal module entry points. Runtime code stays inside this module folder, normally under `src` and an optional module-local `lib`; it must not import helper code from sibling modules. Human documentation belongs under `docs`, tests under `tests`, and build logic under `build`.
 
 Generated build, test, validation, package, log, and report output belongs under the ignored `artifacts` directory, not committed source folders.
 
-## Local import
+## Local development
+
+Clone the repository for development:
+
+```text
+git clone https://github.com/Kmac907/WinPush.git
+cd WinPush
+```
+
+Then import directly from the working tree:
 
 ```powershell
 Test-ModuleManifest .\WinPush.psd1
@@ -70,6 +81,15 @@ The build:
 
 The offline gate does not require live targets.
 
+After it passes, create the same release ZIP used by GitHub Releases:
+
+```powershell
+.\build\build.ps1
+.\build\package.ps1
+```
+
+The package script reads `ModuleVersion` from the manifest, stages the complete module under `artifacts\release\WinPush`, validates and imports that staged module, and writes `artifacts\release\WinPush-<version>.zip`.
+
 ## Optional live checks
 
 Transport smoke checks are explicit build parameters:
@@ -90,9 +110,9 @@ Manual checks should use a controlled target and harmless operations:
 - Confirm copied files with `-Logs`.
 - Run `tests\Integration\Invoke-WinPushPackageLiveValidation.ps1` for the package workflow described in [package workflow](package-workflow.md#live-validation).
 
-## Module package metadata
+## Future Gallery package metadata
 
-The manifest supplies metadata used by PSResourceGet packaging:
+The current GitHub Release ZIP is created by `build/package.ps1` with `Compress-Archive`. The manifest already supplies metadata needed for a future PowerShell Gallery transition:
 
 - `Description`
 - `FormatsToProcess`
@@ -100,7 +120,7 @@ The manifest supplies metadata used by PSResourceGet packaging:
 - `PrivateData.PSData.ProjectUri`
 - `PrivateData.PSData.LicenseUri`
 
-`ProjectUri` must remain populated. Every manifest-declared file must exist in the staged package root before `Compress-PSResource` runs.
+`ProjectUri` must remain populated. If Gallery publishing is added, every manifest-declared file must exist in the staged package root before `Compress-PSResource` runs.
 
 Verify an installed package contains its format data:
 
@@ -117,11 +137,11 @@ Test-Path (Join-Path $Module.ModuleBase 'WinPush.format.ps1xml')
 
 ## Versioning and releases
 
-The manual `Release WinPush` GitHub Actions workflow accepts a `patch`, `minor`, or `major` version bump. It updates `ModuleVersion` in `WinPush.psd1`, packages the module files and `src` tree as `dist/WinPush-<version>.zip`, commits the version change, creates an annotated `v<version>` tag, pushes the commit and tag atomically to `main`, and creates a GitHub release containing the ZIP.
+The manual `Release WinPush` GitHub Actions workflow accepts a `patch`, `minor`, or `major` version bump. It updates `ModuleVersion` in `WinPush.psd1`, runs `build/package.ps1`, commits the version change, creates an annotated `v<version>` tag, pushes the commit and tag atomically to `main`, and creates a GitHub release containing `artifacts/release/WinPush-<version>.zip`.
 
 Run the offline quality gate before dispatching a release. The workflow packages the selected `main` revision; it does not run the repository's Windows-only quality gate.
 
-Source installation is documented in the [README](../README.md#install). The manifest's project and license URIs must continue to point to this repository and its GPL-3.0-only license.
+Release installation is documented in the [README](../README.md#install). The manifest's project and license URIs must continue to point to this repository and its GPL-3.0-only license.
 
 ## Recovery
 
@@ -131,7 +151,7 @@ Unload the module from the current session with:
 Remove-Module WinPush
 ```
 
-Delete the cloned directory when it is no longer needed. Remove any separately installed release copy from the module path where it was placed.
+Delete a development clone when it is no longer needed. Remove an installed release version from the corresponding user or system PowerShell module path.
 
 Remove caller-controlled captures and copied logs under `C:\WinPush` or the selected `OutputRoot` when they are no longer required. Remote files or changes created by caller-supplied commands, scripts, transfers, or retained package stages require separate operator cleanup.
 

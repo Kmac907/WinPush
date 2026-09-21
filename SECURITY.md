@@ -21,3 +21,5 @@ Remove credentials, PATs, access tokens, private keys, certificates, connection 
 ## Package integrity
 
 `Invoke-WinPushPackage -ExpectedSha256` can verify an HTTPS download against a caller-supplied SHA-256 value. The parameter is optional. Callers remain responsible for package provenance, content approval, and any organizational signing or mandatory checksum policy.
+
+The release installer requires and verifies GitHub's SHA-256 digest for the selected versioned ZIP. That digest protects the release asset, not the mutable `install.ps1` fetched from `main`; use the inspect-first installation steps in the README when policy prohibits executing unreviewed remote code.

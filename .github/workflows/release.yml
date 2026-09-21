@@ -57,13 +57,7 @@ jobs:
 
       - name: Package module
         shell: pwsh
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          $modulePath = New-Item -Path './dist/WinPush' -ItemType Directory -Force
-          Copy-Item -LiteralPath './WinPush.psd1', './WinPush.psm1', './WinPush.format.ps1xml' -Destination $modulePath
-          Copy-Item -LiteralPath './src' -Destination $modulePath -Recurse
-          Compress-Archive -LiteralPath $modulePath -DestinationPath "./dist/WinPush-$env:VERSION.zip"
+        run: ./build/package.ps1
 
       - name: Commit and tag version
         shell: bash
@@ -85,4 +79,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
-        run: gh release create "v${VERSION}" "dist/WinPush-${VERSION}.zip" --verify-tag --generate-notes --title "WinPush v${VERSION}"
+        run: gh release create "v${VERSION}" "artifacts/release/WinPush-${VERSION}.zip" --verify-tag --generate-notes --title "WinPush v${VERSION}"

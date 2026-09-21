@@ -20,6 +20,7 @@ $moduleName = 'WinPush'
 $srcPath = Join-Path -Path $repoRoot -ChildPath 'src'
 $testsPath = Join-Path -Path $repoRoot -ChildPath 'tests'
 $buildPath = Join-Path -Path $repoRoot -ChildPath 'build'
+$installerPath = Join-Path -Path $repoRoot -ChildPath 'install.ps1'
 $settingsPath = Join-Path -Path $repoRoot -ChildPath 'PSScriptAnalyzerSettings.psd1'
 $smokeScriptPath = Join-Path -Path $testsPath -ChildPath 'Integration\Invoke-WinPushTransportSmoke.ps1'
 $requiredPesterVersion = [version] '3.4.0'
@@ -80,7 +81,7 @@ Test-ModuleManifest -Path $manifestPath | Out-Null
 Remove-Module -Name $moduleName -Force -ErrorAction SilentlyContinue
 Import-Module -Name $manifestPath -Force
 
-$analysisTargets = @($srcPath, $testsPath, $buildPath)
+$analysisTargets = @($srcPath, $testsPath, $buildPath, $installerPath)
 $analysisResults = foreach ($analysisTarget in $analysisTargets) {
     Invoke-ScriptAnalyzer -Path $analysisTarget -Settings $settingsPath -Recurse
 }

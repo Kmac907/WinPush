@@ -113,7 +113,7 @@ Describe 'WinPush module import foundation' {
     It 'declares the approved PowerShell runtime and edition' {
         $manifest = Import-PowerShellDataFile -LiteralPath $script:ManifestPath
 
-        $manifest.ModuleVersion | Should Be '0.2.0'
+        ([string] $manifest.ModuleVersion) | Should Match '^\d+\.\d+\.\d+$'
         $manifest.PowerShellVersion | Should Be '7.6'
         ($manifest.CompatiblePSEditions -join ',') | Should Be 'Core'
     }
