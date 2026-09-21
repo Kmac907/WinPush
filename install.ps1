@@ -1,6 +1,5 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('CurrentUser', 'AllUsers')]
     [string] $Scope
 )
 

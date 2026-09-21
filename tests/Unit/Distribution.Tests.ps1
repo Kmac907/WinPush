@@ -52,6 +52,24 @@ function New-TestPackageArchive {
     $archivePath
 }
 
+function Test-WinPushInstallerExpression {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSAvoidUsingInvokeExpression',
+        '',
+        Justification = 'Exercises the documented irm pipeline regression.'
+    )]
+    [CmdletBinding()]
+    param()
+
+    $tokens = $null
+    $errors = $null
+    $ast = [Management.Automation.Language.Parser]::ParseFile($script:InstallerPath, [ref] $tokens, [ref] $errors)
+    New-Variable -Name Scope -Value ''
+    $null = $tokens
+
+    Invoke-Expression "$($ast.ParamBlock.Extent.Text)`n'loaded'"
+}
+
 Describe 'WinPush release package' {
     It 'contains exactly the module, documentation, license, and complete src tree' {
         $archive = [IO.Compression.ZipFile]::OpenRead($script:PackageResult.ZipPath)
@@ -92,6 +110,10 @@ Describe 'WinPush release package' {
 }
 
 Describe 'WinPush installer scope selection' {
+    It 'loads through Invoke-Expression when the caller has a blank Scope variable' {
+        Test-WinPushInstallerExpression | Should Be 'loaded'
+    }
+
     It 'maps prompt choice 1 to CurrentUser' {
         Select-WinPushInstallScope -Prompt { 0 } | Should Be 'CurrentUser'
     }
