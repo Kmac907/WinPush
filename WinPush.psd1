@@ -1,6 +1,6 @@
 @{
     RootModule           = 'WinPush.psm1'
-    ModuleVersion        = '0.2.0'
+    ModuleVersion        = '0.3.0'
     GUID                 = '4e7a6812-7b4f-4a4b-86dd-53f5b5c31d3f'
     Author               = 'Kyle Maclachlan'
     Copyright            = '(c) 2026 Kyle Maclachlan. Licensed under GPL-3.0-only.'
