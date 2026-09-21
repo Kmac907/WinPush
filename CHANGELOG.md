@@ -2,10 +2,27 @@
 
 ## Unreleased
 
-- Refreshed repository documentation and added native help for every exported command.
-- Added versioned GitHub Release ZIP packaging with staged manifest validation.
+## 0.3.0 - 2026-09-21
+
+### Added
+
+- Added native help for every exported command and refreshed the task, command, package, development, security, and release documentation.
+- Added a manual GitHub release workflow and versioned release ZIP packaging with staged manifest validation.
 - Added an interactive, scope-aware installer that verifies GitHub's SHA-256 asset digest and installs module versions side by side.
+- Added GPL-3.0 licensing and public GitHub project metadata.
+
+### Changed
+
 - Made release installation the primary setup path and moved clone-based setup into development documentation.
+
+### Fixed
+
+- Preserved native command exit codes and structured output during PSRP command execution.
+- Applied timeouts to PSRP remediation staging, execution, and cleanup, including process-tree termination with exit code `124`.
+- Hardened remote stage-root and local artifact-path validation for invalid, reserved, and overlong Windows path components.
+- Isolated attached-log failures by target and surfaced URI package-cache cleanup failures without replacing the primary remote result.
+- Preserved Unicode data in captured CSV summaries.
+- Rejected incomplete Microsoft Graph device results before changing an Entra host file.
 
 ## 0.2.0
 
