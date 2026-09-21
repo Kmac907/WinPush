@@ -1,75 +1,52 @@
-# WinPush
+<p align="center">
+  <img src="docs/assets/winpush-logo.svg"
+       width="700"
+       alt="WinPush">
+</p>
 
-## Overview
+<h1 align="center">WinPush</h1>
 
-`WinPush` is a PowerShell 7.6 module for Windows endpoint administration. It uses PSRP over WinRM by default to test targets, run commands, scripts, packages, and detect/remediate pairs, transfer individual files, retrieve logs, and inspect captured runs. Command, script, and remediation execution can also use WinRS or PsExec when those native tools are already available.
+<p align="center">
+  PSRP-first remote administration for Windows endpoints.<br>
+  Run, transfer, capture, remediate, and inspect with structured results.
+</p>
 
-The module provides:
+<p align="center">
+  <img alt="PowerShell 7.6 or newer" src="https://img.shields.io/badge/PowerShell-7.6%2B-2563EB">
+  <img alt="Windows platform" src="https://img.shields.io/badge/platform-Windows-0B1220">
+</p>
 
-- PSRP target connectivity checks
-- remote command and local script execution
-- single-file upload and download
-- remote log retrieval
-- package staging, execution, output capture, log copy, and cleanup through PSRP
-- Windows PowerShell 5.1 remediation validation and detect/remediate execution
-- captured-run history and Entra group host-file export
-- structured per-target result objects
+---
 
-## Purpose
+WinPush is a PowerShell module for repeatable Windows endpoint administration. It uses PowerShell Remoting Protocol (PSRP) over WinRM by default and returns structured, per-target results. Command, script, and remediation execution can also use WinRS or an operator-supplied PsExec executable.
 
-This module exists to provide a repeatable PowerShell controller workflow for Windows endpoint administration.
+> [!WARNING]
+> WinPush executes caller-supplied commands and scripts on remote computers. Confirm the target list, authorization, package provenance, and requested side effects before running a command. WinPush does not configure WinRM, firewall rules, TrustedHosts, certificates, endpoints, or policy for you.
 
-Use this module when you need to:
+## Why WinPush
 
-- validate whether Windows targets can accept PSRP sessions
-- run controlled command text or local `.ps1` files on one or more targets
-- copy one file to or from a target
-- retrieve immediate files from a known remote log directory
-- stage and run a local or URI package with one package-relative PowerShell entry point
-- validate and run a detection/remediation script pair
-- read a captured `summary.csv` or export Entra device names to a host file
-- optionally write local execution artifacts for review
+- Test PSRP connectivity before a change.
+- Run command text, local PowerShell scripts, packages, and detect/remediate pairs.
+- Upload or download one file and retrieve immediate files from a remote log directory.
+- Resolve targets consistently from arguments, pipeline input, or host files.
+- Capture correlated root and per-target logs without replacing the remote outcome when local artifact writes fail.
+- Inspect captured `summary.csv` files and export Entra device names to a host file.
+- Use compact default formatting while retaining full output, errors, metadata, and artifact paths.
 
-Out of scope:
+WinPush intentionally does not implement automatic transport configuration, credential storage, retries, parallel fan-out, SSH, recursive file transfer, recursive log copy, package manifests, dependency graphs, signing, or mandatory checksums.
 
-- automatic WinRM, firewall, TrustedHosts, certificate, endpoint, or policy configuration
-- credential storage
-- recursive transfer, recursive log copy, retries, parallel fan-out, SSH transport, package manifests, package dependency graphs, package signing, or mandatory checksum policy
+## Requirements
 
-## Repository Layout
-
-```text
-WinPush/
-├─ README.md
-├─ WinPush.psd1
-├─ WinPush.psm1
-├─ WinPush.format.ps1xml
-├─ src/
-│  ├─ Public/
-│  └─ Private/
-├─ docs/
-├─ tests/
-│  ├─ Fixtures/
-│  ├─ Integration/
-│  └─ Unit/
-└─ build/
-   └─ build.ps1
-```
-
-Notes:
-
-- `WinPush.psd1` and `WinPush.psm1` are the PowerShell module entry points required for normal `Import-Module` behavior.
-- Runtime implementation must stay inside this module folder, normally under `src/` and optional module-local `lib/`.
-- Runtime code must not import helper code from sibling module folders.
-- `docs/` is for human-facing supporting material only.
-- `tests/` is for validation and regression coverage.
-- `build/` is for the module-local build and validation entry point; it is not runtime code or pipeline-only deployment logic.
-- `packaging/` is not currently used.
-- Generated build, test, package, log, or report output must be written outside committed source folders, normally under the ignored `artifacts/` folder.
+- PowerShell 7.6 or newer, Core edition, on a Windows controller.
+- Windows targets reachable over WinRM/PSRP and an authorized current identity or `PSCredential`.
+- Target-side permissions for each requested command, script, file, log, or package operation.
+- An elevated controller session for native WinRS or PsExec transports.
+- An available `PsExec.exe` when using `-Transport PsExec`; WinPush does not download or redistribute it.
+- Installed Microsoft Graph PowerShell commands and an authenticated `Connect-MgGraph` context only for `Export-WinPushHostFileFromEntraGroup`.
 
 ## Install
 
-WinPush is currently distributed from source. Clone the repository:
+Clone the repository:
 
 ```text
 git clone https://github.com/Kmac907/WinPush.git
@@ -89,230 +66,105 @@ Import-Module .\WinPush.psd1 -Force
 Get-Command -Module WinPush
 ```
 
-## Quickstart
+## First command
 
 ```powershell
-Import-Module WinPush
-
+Import-Module .\WinPush.psd1 -Force
 Invoke-WinPushCommand -ComputerName PC01 -Command 'whoami'
 ```
 
-Expected result:
+Representative output:
 
 ```text
 ComputerName Transport Status ExitCode OutputSummary ErrorSummary
------------- -------- ------ -------- ------------- ------------
-PC01         Psrp     OK     0        PC01\operator
+------------ --------- ------ -------- ------------- ------------
+PC01         Psrp      OK     0        PC01\operator
 ```
 
-## Command Summary
+## Choose a command
 
-| Command | Purpose |
+| Task | Command |
 | --- | --- |
-| `Test-WinPushTarget` | Tests whether one or more targets can create PSRP sessions. |
-| `Invoke-WinPushCommand` | Runs command text on one or more targets through PSRP, WinRS, or PsExec. |
-| `Invoke-WinPushScript` | Runs an existing local `.ps1` file on one or more targets through PSRP, WinRS, or PsExec. |
-| `Copy-WinPushItem` | Uploads or downloads one file through PSRP. |
-| `Get-WinPushLog` | Copies immediate files from an explicit remote log directory. |
-| `Invoke-WinPushPackage` | Stages a local or cached URI package through PSRP, runs one package-relative `.ps1` entry point, and can capture output, copy logs, and clean remote staging. |
-| `Get-WinPushRun` | Reads a captured run's `summary.csv` and maps each row to its safe per-target log path. |
-| `Test-WinPushRemediation` | Validates detection and remediation scripts with the Windows PowerShell 5.1 parser without executing them. |
-| `Invoke-WinPushRemediation` | Runs a detect/remediate pair through PSRP, WinRS, or PsExec. |
-| `Export-WinPushHostFileFromEntraGroup` | Writes enabled Entra device display names from a group to a host file. |
+| Test whether targets accept PSRP sessions | `Test-WinPushTarget` |
+| Run command text | `Invoke-WinPushCommand` |
+| Run an existing local `.ps1` file | `Invoke-WinPushScript` |
+| Upload or download one file | `Copy-WinPushItem` |
+| Copy immediate files from a remote log directory | `Get-WinPushLog` |
+| Stage and run a local or HTTPS package | `Invoke-WinPushPackage` |
+| Read a captured run's `summary.csv` | `Get-WinPushRun` |
+| Validate a detect/remediate pair without executing it | `Test-WinPushRemediation` |
+| Run a detect/remediate pair | `Invoke-WinPushRemediation` |
+| Export Entra group device names to a host file | `Export-WinPushHostFileFromEntraGroup` |
 
-Command standards:
+## Documentation
 
-- public commands use approved PowerShell verbs
-- exported commands are explicit in the module manifest
-- command details are documented in [docs/commands.md](docs/commands.md)
+- [Command behavior and output](docs/commands.md)
+- [Task-oriented examples](docs/examples.md)
+- [Package workflow](docs/package-workflow.md)
+- [Development, testing, and releases](docs/development.md)
+- [Release history](CHANGELOG.md)
+- [Security guidance](SECURITY.md)
 
-## Common Examples
+## Transport support
 
-Test a target:
+| Command | PSRP | WinRS (`WinRM`) | PsExec | Local or service API |
+| --- | --- | --- | --- | --- |
+| `Test-WinPushTarget` | Yes | No | No | No |
+| `Invoke-WinPushCommand` | Yes | Yes | Yes | No |
+| `Invoke-WinPushScript` | Yes | Yes | Yes | No |
+| `Copy-WinPushItem` | Yes | No | No | No |
+| `Get-WinPushLog` | Yes | No | No | No |
+| `Invoke-WinPushPackage` | Yes | No | No | No |
+| `Get-WinPushRun` | No | No | No | Local files |
+| `Test-WinPushRemediation` | No | No | No | Local Windows PowerShell 5.1 parser |
+| `Invoke-WinPushRemediation` | Yes | Yes | Yes | No |
+| `Export-WinPushHostFileFromEntraGroup` | No | No | No | Microsoft Graph |
 
-```powershell
-Test-WinPushTarget -ComputerName PC01
+`Psrp` is the default transport. The public value `WinRM` selects native `winrs.exe`; it does not select the PSRP-over-WinRM default.
+
+## Results and artifacts
+
+Remote operations return `WinPush.ExecutionResult` objects. `Get-WinPushRun` returns `WinPush.RunResult`; `Test-WinPushRemediation` returns `WinPush.RemediationValidationResult`; Entra export emits written names only with `-PassThru`.
+
+Execution results retain `ComputerName`, `Transport`, `Operation`, `Succeeded`, `ExitCode`, `Output`, `Errors`, `ErrorMessage`, `ArtifactError`, `Logs`, `CopiedLogPaths`, and artifact paths. Script, package, and remediation operations add their relevant metadata. Use `Format-List *` to inspect the full object.
+
+With `-CaptureOutput`, WinPush creates a shared run directory whose timestamp and GUID prevent same-second collisions. Unsafe target names are converted to a safe directory component with a stable hash suffix while the result's `ComputerName` stays unchanged.
+
+```text
+<OutputRoot>\<timestamp>-<GUID>\
+|-- summary.csv
+|-- run.log
+`-- <safe-target>\
+    |-- run.log
+    `-- Logs\
+        `-- <copied files>
 ```
 
-Run command text:
+Root and per-target `run.log` files are updated gradually. `ArtifactError` reports local write failures without replacing the primary remote result. See [command behavior and output](docs/commands.md#capture-layout-and-safe-target-paths) for the complete contract.
+
+## Native help
+
+Every exported command includes comment-based help:
 
 ```powershell
-Invoke-WinPushCommand -ComputerName PC01 -Command 'hostname'
+Get-Help Invoke-WinPushCommand -Full
+Get-Help Invoke-WinPushPackage -Examples
+Get-Help Copy-WinPushItem -Parameter Direction
 ```
 
-Run command text and capture output files:
+## Develop
 
-```powershell
-Invoke-WinPushCommand `
-    -ComputerName PC01 `
-    -Command 'hostname' `
-    -CaptureOutput `
-    -OutputRoot C:\WinPush
-```
-
-Run a local script:
-
-```powershell
-Invoke-WinPushScript `
-    -ComputerName PC01 `
-    -ScriptPath .\Install-EA.ps1
-```
-
-Run a local script through WinRS:
-
-```powershell
-Invoke-WinPushScript `
-    -ComputerName PC01 `
-    -ScriptPath .\Install-EA.ps1 `
-    -Transport WinRM
-```
-
-Native script transports copy the script through small native PowerShell staging commands, invoke the staged file under `C:\Windows\Temp\WinPush\<stage-id>\`, and remove the staged folder after execution. Use `-KeepStagedScript` only when you need to inspect the staged file after a run.
-
-Run a package and copy package logs:
-
-```powershell
-Invoke-WinPushPackage `
-    -ComputerName PC01 `
-    -Path .\EAInstallPackage `
-    -EntryPoint .\Install-EA.ps1 `
-    -CaptureOutput `
-    -Logs `
-    -Cleanup OnSuccess
-```
-
-Inspect the captured run returned by an execution result:
-
-```powershell
-$Run = Invoke-WinPushCommand -ComputerName PC01 -Command 'hostname' -CaptureOutput
-Get-WinPushRun -Path $Run.RunDirectory
-```
-
-Validate and invoke a remediation pair:
-
-```powershell
-Test-WinPushRemediation -DetectScript .\Detect.ps1 -RemediateScript .\Remediate.ps1
-Invoke-WinPushRemediation -ComputerName PC01 -DetectScript .\Detect.ps1 -RemediateScript .\Remediate.ps1
-```
-
-Copy a file to a target:
-
-```powershell
-Copy-WinPushItem `
-    -ComputerName PC01 `
-    -Path .\payload.txt `
-    -Destination C:\Windows\Temp\payload.txt
-```
-
-More examples are in [docs/examples.md](docs/examples.md).
-
-## Output Contract
-
-Remote execution and transfer commands return structured `WinPush.ExecutionResult` objects. `Get-WinPushRun` returns `WinPush.RunResult`, `Test-WinPushRemediation` returns `WinPush.RemediationValidationResult`, and Entra export returns written names only with `-PassThru`.
-
-| Property Or Output | Type | Meaning |
-| --- | --- | --- |
-| `ComputerName` | `string` | Target name for the result. |
-| `Transport` | `string` | Transport used, such as `Psrp`, `WinRM`, or `PsExec`. |
-| `Operation` | `string` | Operation name, such as `TestTarget`, `RunCommand`, `RunScript`, `RunPackage`, `CopyFile`, or `GetLogs`. |
-| `Succeeded` | `bool` | Whether the target operation succeeded. |
-| `ExitCode` | `int` / `$null` | Command, script, native process, or synthetic operation exit code. |
-| `Output` | `object[]` | Captured output records retained in the result object. |
-| `Errors` | `object[]` | Captured error records retained in the result object. |
-| `ErrorMessage` | `string` | Human-readable failure message when available. |
-| `ArtifactError` | `string` | Local artifact-write failure, if any. It does not replace the primary remote outcome. |
-| `Logs` | `WinPush.LogResult[]` | Per-file log copy results. |
-| `CopiedLogPaths` | `string[]` | Local paths for successfully copied logs. |
-| `RunDirectory` | `string` | Shared local run directory when artifacts are written. |
-| `ComputerDirectory` | `string` | Per-target local artifact directory when artifacts are written. |
-| `ResultPath` | `string` | Local per-target `run.log` path when captured output artifacts are written. |
-| `StdOutPath` | `string` | Reserved for optional separate stdout diagnostics; blank for the default artifact contract. |
-| `StdErrPath` | `string` | Reserved for optional separate stderr diagnostics; blank for the default artifact contract. |
-| `Script` | `string` | Script file name for `Invoke-WinPushScript` results. Blank for other operations. |
-| `RemediationMetadata` | `WinPush.RemediationMetadata` | Remediation status plus separate detection/remediation exit codes, output, and errors. |
-
-Default formatting displays compact per-command tables. Every command summary includes the selected transport. `Invoke-WinPushCommand` adds `OutputSummary`, a short first-value command-output summary. Successful rows leave `ErrorSummary` blank; failed rows show a short normalized summary. Full output, full errors, logs, package metadata, and artifact paths remain available on the returned object with property access or `Format-List *`. When `-CaptureOutput` is used, detailed output and errors are written to root and per-target `run.log` files.
-
-Generated files, logs, reports, or receipts:
-
-| Artifact | Location | Purpose | Retention |
-| --- | --- | --- | --- |
-| Run summary | `<OutputRoot>\<timestamp>-<GUID>\summary.csv` | Run-level CSV summary for captured command, script, package, or remediation output. | Operator controlled. |
-| Correlated run log | `<OutputRoot>\<timestamp>-<GUID>\run.log` | Human-readable run log updated gradually as stages, output, and errors occur. | Operator controlled. |
-| Per-target run log | `<OutputRoot>\<timestamp>-<GUID>\<safe-target>\run.log` | Per-target log created before remote work and updated gradually. | Operator controlled. |
-| Copied logs | `<OutputRoot>\<timestamp>-<GUID>\<safe-target>\Logs\` | Immediate files copied from documented remote log directories. | Operator controlled. |
-
-Run names include a timestamp and GUID so concurrent runs cannot collide. Unsafe target names, including IPv6 addresses, reserved Windows names, separators, and traversal-like values, are converted to one safe directory component with a stable hash suffix; `ComputerName` in the result remains unchanged. Artifact failures are reported through `ArtifactError`, and execution continues where possible. This module does not write generated runtime output back into the repository.
-
-## Prerequisites
-
-- PowerShell 7.6 or later
-- Windows controller
-- Windows targets reachable over WinRM/PSRP
-- current Windows identity or supplied `PSCredential` authorized on the target
-- target-side permissions for the requested command, script, file copy, or log retrieval operation
-- elevated PowerShell when using WinRM or PsExec native transports
-- PsExec available locally when using `-Transport PsExec`; WinPush invokes it with `-h` so the remote process uses an elevated token when available
-- Microsoft Graph PowerShell commands and an authenticated `Connect-MgGraph` context only when using `Export-WinPushHostFileFromEntraGroup`; Graph is not a required module dependency
-
-## Testing
-
-Run the offline quality gate from this module folder:
+Run the offline quality gate from the repository root:
 
 ```powershell
 .\build\build.ps1
 ```
 
-The gate validates the manifest, imports the module, runs PSScriptAnalyzer, runs the 451-test offline baseline with Pester 3.4.0, and writes test and coverage artifacts under `artifacts\build`. The enforced command-coverage minimum is 82.09 percent; the build fails below it. Live targets are opt-in, so the default gate remains offline.
+The gate validates the manifest, imports the module, runs PSScriptAnalyzer, runs the offline Pester 3.4.0 suite, enforces the coverage threshold defined in build configuration, and writes results under `artifacts\build`. See the [development guide](docs/development.md) for prerequisites, optional live checks, packaging, and releases.
 
-Install and retain the exact test dependency:
+## Support and security
 
-```powershell
-Install-Module Pester -RequiredVersion 3.4.0 -Scope CurrentUser
-```
-
-Optional transport smoke checks are explicit build parameters:
-
-```powershell
-.\build\build.ps1 -PsrpTarget PC01
-.\build\build.ps1 -WinRsTarget PC01
-.\build\build.ps1 -PsExecTarget PC01 -PsExecPath C:\Tools\PsExec.exe
-```
-
-The import foundation can also be checked manually with:
-
-```powershell
-Test-ModuleManifest .\WinPush.psd1
-Import-Module .\WinPush.psd1 -Force
-```
-
-Manual validation:
-
-- test a known reachable target with `Test-WinPushTarget`
-- run a harmless command with `Invoke-WinPushCommand`
-- confirm captured output artifacts when using `-CaptureOutput`
-- confirm copied logs when using `-Logs`
-- run package workflow integration with `.\tests\Integration\Invoke-WinPushPackageLiveValidation.ps1 -ComputerName PC01`
-
-## Migrating From 0.1.0
-
-Version 0.2.0 is pre-1.0 and intentionally changes the contract:
-
-- the exported surface grows from six to ten commands with `Get-WinPushRun`, `Test-WinPushRemediation`, `Invoke-WinPushRemediation`, and `Export-WinPushHostFileFromEntraGroup`
-- run folders change from timestamp-only names to timestamp/GUID names, and raw target directory names are replaced only when needed with safe hashed names
-- command execution adds `-Shell` and native execution adds `-TimeoutSeconds`; timeout failures use exit code `124`
-- capture is gradual, and artifact failures are separated from the primary operation in `ArtifactError`
-- URI packages require HTTPS, accept optional `-ExpectedSha256`, use temporary per-run cache directories, require an absolute `-RemoteStageRoot`, and accept positional package `-ArgumentList`
-- remediation results add `RemediationMetadata`; existing execution result fields remain available
-
-No Microsoft Graph module is loaded or required at import time. Package hashes remain optional, so callers that require content pinning must supply `-ExpectedSha256`.
-
-## Notes
-
-- Keep README content aligned with the module manifest, exported commands, parameters, and output behavior.
-- Keep detailed command behavior in [docs/commands.md](docs/commands.md).
-- Keep long-form usage examples in [docs/examples.md](docs/examples.md).
-- Keep package workflow, versioning, and roadmap details in [docs/packaging.md](docs/packaging.md).
-- Do not commit secrets, tokens, private keys, certificates, or credential-bearing connection strings.
-- Do not commit runtime-generated logs, exports, receipts, state files, or packages unless they are documented contract examples.
-- Prefer explicit parameters, clear failure behavior, and safe defaults.
+- Review command behavior and current limitations in the [command guide](docs/commands.md).
+- Report suspected vulnerabilities privately according to [SECURITY.md](SECURITY.md).
+- Review the repository's [GPL-3.0-only license](LICENSE).
+- Project source: [github.com/Kmac907/WinPush](https://github.com/Kmac907/WinPush).

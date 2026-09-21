@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
+  <title id="title">WinPush terminal and forward arrow logo</title>
+  <desc id="desc">A cyan terminal prompt and blue forward arrow beside the WinPush wordmark.</desc>
+  <rect width="1200" height="320" rx="28" fill="#0B1220"/>
+  <g aria-hidden="true">
+    <rect x="58" y="64" width="300" height="192" rx="22" fill="none" stroke="#22D3EE" stroke-width="14"/>
+    <path d="M98 112L142 154L98 196" fill="none" stroke="#F8FAFC" stroke-width="18" stroke-linecap="square" stroke-linejoin="miter"/>
+    <rect x="154" y="188" width="48" height="16" fill="#F8FAFC"/>
+    <path d="M190 146H282V112L338 160L282 208V174H190Z" fill="#2563EB"/>
+  </g>
+  <g fill="#F8FAFC" aria-hidden="true">
+    <path d="M430 100H454L472 180L490 122H510L528 180L546 100H570L542 216H516L500 166L484 216H458Z"/>
+    <rect x="592" y="134" width="24" height="82" rx="5"/><circle cx="604" cy="110" r="13"/>
+    <path d="M640 134H663V146Q676 131 696 131Q726 131 726 166V216H702V171Q702 153 686 153Q664 153 664 178V216H640Z"/>
+    <path d="M754 100H807Q846 100 846 137Q846 174 807 174H780V216H754ZM780 122V152H804Q821 152 821 137Q821 122 804 122Z"/>
+    <path d="M866 134H890V181Q890 199 907 199Q928 199 928 174V134H952V216H929V204Q916 219 895 219Q866 219 866 184Z"/>
+    <path d="M974 194Q998 204 1016 204Q1031 204 1031 196Q1031 190 1013 187Q979 182 979 159Q979 131 1018 131Q1040 131 1057 140L1048 159Q1031 151 1017 151Q1003 151 1003 158Q1003 164 1022 167Q1056 172 1056 195Q1056 219 1015 219Q986 219 966 210Z"/>
+    <path d="M1078 96H1102V146Q1115 131 1135 131Q1165 131 1165 166V216H1141V171Q1141 153 1125 153Q1102 153 1102 178V216H1078Z"/>
+  </g>
+</svg>
