@@ -7,8 +7,8 @@
 <h1 align="center">WinPush</h1>
 
 <p align="center">
-  PSRP-first remote administration for Windows endpoints.<br>
-  Run, transfer, capture, remediate, and inspect with structured results.
+  <strong>PSRP-first remote administration for Windows endpoints.</strong><br>
+  <em>Run, transfer, capture, remediate, and inspect with structured results.</em>
 </p>
 
 <p align="center">
