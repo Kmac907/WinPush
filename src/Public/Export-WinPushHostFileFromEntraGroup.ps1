@@ -1,3 +1,53 @@
+<#
+.SYNOPSIS
+Exports Entra group device names to a WinPush host file.
+
+.DESCRIPTION
+Uses an existing authenticated Microsoft Graph context to resolve a group by ID or exact display name, filters its device members, removes duplicate display names case-insensitively, and writes the resulting host file as UTF-8.
+
+.PARAMETER GroupId
+The Entra group ID. This parameter is mutually exclusive with GroupName.
+
+.PARAMETER GroupName
+The exact Entra group display name. The command fails when the name is missing or ambiguous. This parameter is mutually exclusive with GroupId.
+
+.PARAMETER OutputPath
+The host file to create or update.
+
+.PARAMETER IncludeDisabled
+Includes disabled device objects. Disabled devices are excluded by default.
+
+.PARAMETER Append
+Appends only names not already present in the output file, compared case-insensitively. Without this switch, the file is replaced.
+
+.PARAMETER PassThru
+Returns only the device names written by this invocation.
+
+.PARAMETER Transitive
+Uses flattened transitive group membership instead of direct membership.
+
+.EXAMPLE
+Export-WinPushHostFileFromEntraGroup -GroupName 'Windows Pilot Devices' -OutputPath .\hosts.txt
+
+Writes enabled direct device members of the named group to hosts.txt.
+
+.EXAMPLE
+Export-WinPushHostFileFromEntraGroup -GroupId $GroupId -OutputPath .\hosts.txt -Transitive -Append -PassThru
+
+Appends unique enabled transitive device members and returns the newly written names.
+
+.INPUTS
+None. This command does not accept pipeline input.
+
+.OUTPUTS
+System.String when PassThru is used. Otherwise the command produces no pipeline output.
+
+.NOTES
+Microsoft Graph is optional and is not loaded when WinPush imports. Get-MgContext and the applicable group commands must already be available.
+
+.LINK
+docs/examples.md#export-entra-devices
+#>
 function Export-WinPushHostFileFromEntraGroup {
     [CmdletBinding(DefaultParameterSetName = 'GroupId')]
     param(

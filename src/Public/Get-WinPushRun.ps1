@@ -1,3 +1,30 @@
+<#
+.SYNOPSIS
+Reads the summary from a captured WinPush run.
+
+.DESCRIPTION
+Imports summary.csv from an existing run directory, restores typed success and exit-code values, preserves the remaining row fields, and adds the run directory plus the mapped per-target log path and its availability.
+
+.PARAMETER Path
+An existing captured run directory containing summary.csv.
+
+.EXAMPLE
+Get-WinPushRun -Path C:\WinPush\20-09-2026-120000-00000000-0000-0000-0000-000000000000
+
+Reads the captured summary and resolves each target log path.
+
+.INPUTS
+None. This command does not accept pipeline input.
+
+.OUTPUTS
+WinPush.RunResult
+
+.NOTES
+TargetLogPath uses the same safe target-directory mapping as artifact capture. Invalid boolean or integer values in summary.csv cause a terminating error.
+
+.LINK
+docs/commands.md#capture-layout-and-safe-target-paths
+#>
 function Get-WinPushRun {
     [CmdletBinding()]
     param(

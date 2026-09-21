@@ -8,6 +8,50 @@ function Test-WinPushAbsoluteWindowsPath {
     return ($Path -match '^[A-Za-z]:[\\/]' -or $Path -match '^\\\\[^\\\/]+[\\\/][^\\\/]+([\\\/].*)?$')
 }
 
+<#
+.SYNOPSIS
+Copies immediate files from a remote log directory through PSRP.
+
+.DESCRIPTION
+Creates a temporary PSSession for each resolved target and copies the immediate regular files from one explicit absolute Windows directory into a local per-target Logs directory. The command does not recurse or read copied file contents into memory.
+
+.PARAMETER ComputerName
+Target names supplied directly, through pipeline strings, or through pipeline objects with a ComputerName property. Use this parameter or HostFile.
+
+.PARAMETER HostFile
+A UTF-8 target file. Blank lines and full-line comments beginning with # are ignored, and duplicate targets are removed case-insensitively.
+
+.PARAMETER RemoteDirectory
+An absolute drive-rooted or UNC directory on each target.
+
+.PARAMETER OutputRoot
+The local artifact root. The default is C:\WinPush.
+
+.PARAMETER Credential
+An optional credential for PSRP session creation. The current Windows identity is used when omitted.
+
+.EXAMPLE
+Get-WinPushLog -ComputerName PC01 -RemoteDirectory C:\ProgramData\EA\Logs\Inventory
+
+Copies immediate files from the specified directory on PC01.
+
+.EXAMPLE
+Get-WinPushLog -HostFile .\hosts.txt -RemoteDirectory C:\ProgramData\EA\Logs\Inventory -OutputRoot D:\WinPush
+
+Copies logs from every resolved host-file target into one shared local run directory.
+
+.INPUTS
+System.String and objects with a ComputerName property.
+
+.OUTPUTS
+WinPush.ExecutionResult
+
+.NOTES
+Only PSRP is supported. This command creates copied-log artifacts but does not write summary.csv or run.log.
+
+.LINK
+docs/commands.md#log-conventions
+#>
 function Get-WinPushLog {
     [CmdletBinding(DefaultParameterSetName = 'ComputerName')]
     param(

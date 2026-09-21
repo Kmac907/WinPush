@@ -65,6 +65,80 @@ function Set-WinPushPackageCleanupResult {
     $Result
 }
 
+<#
+.SYNOPSIS
+Stages and runs a PowerShell package on one or more Windows targets.
+
+.DESCRIPTION
+Accepts one existing local file or directory, or downloads one absolute HTTPS URI to a temporary controller cache. The command stages the package through PSRP, optionally extracts a ZIP, runs one package-relative .ps1 entry point, optionally captures output and copies convention logs, and applies the requested remote cleanup policy.
+
+.PARAMETER ComputerName
+Target names supplied directly, through pipeline strings, or through pipeline objects with a ComputerName property. Use this parameter or HostFile.
+
+.PARAMETER HostFile
+A UTF-8 target file. Blank lines and full-line comments beginning with # are ignored, and duplicate targets are removed case-insensitively.
+
+.PARAMETER Path
+An existing local package file or directory. This parameter is mutually exclusive with Uri.
+
+.PARAMETER Uri
+An absolute HTTPS package URI downloaded by the controller before endpoint staging. This parameter is mutually exclusive with Path.
+
+.PARAMETER EntryPoint
+A package-relative PowerShell .ps1 path. Rooted paths, parent traversal, empty segments, and non-PowerShell entry points are rejected.
+
+.PARAMETER ArgumentList
+Positional values passed to the entry point in its declared parameter order. The default is an empty array.
+
+.PARAMETER ExpectedSha256
+An optional 64-character hexadecimal SHA-256 value for a URI download. A mismatch stops before target sessions open.
+
+.PARAMETER Extract
+Extracts a staged .zip file on the target before execution. Non-ZIP files and directory packages are rejected.
+
+.PARAMETER CaptureOutput
+Writes one shared summary.csv, one correlated root run.log, and one per-target run.log beneath OutputRoot.
+
+.PARAMETER Logs
+Copies immediate files from C:\ProgramData\EA\Logs\<entry-point-base-name> through the existing PSRP session.
+
+.PARAMETER Cleanup
+The remote stage policy: Never, OnSuccess, or Always. The default is Never. Cleanup runs after optional log collection.
+
+.PARAMETER OutputRoot
+The local artifact root used by capture and log collection. The default is C:\WinPush.
+
+.PARAMETER PackageCacheRoot
+The parent of the temporary per-invocation URI cache. The default is C:\WinPush\PackageCache. The generated cache directory is removed after success or failure.
+
+.PARAMETER RemoteStageRoot
+An absolute drive-rooted or UNC target staging root. The default is C:\ProgramData\WinPush\Staging.
+
+.PARAMETER Credential
+An optional credential for PSRP session creation. The current Windows identity is used when omitted.
+
+.EXAMPLE
+Invoke-WinPushPackage -ComputerName PC01 -Path .\EAInstallPackage -EntryPoint .\Install-EA.ps1 -CaptureOutput -Logs -Cleanup OnSuccess
+
+Stages a local directory, runs its entry point, captures output, copies logs, and removes a successful stage.
+
+.EXAMPLE
+Invoke-WinPushPackage -HostFile .\hosts.txt -Uri https://packages.example.test/EA.zip -ExpectedSha256 $Hash -EntryPoint .\Install-EA.ps1 -ArgumentList 'Production', $true -Extract -Cleanup Always
+
+Downloads and verifies a ZIP once, stages it to each resolved target, extracts it, passes positional arguments, and removes every created stage.
+
+.INPUTS
+System.String and objects with a ComputerName property.
+
+.OUTPUTS
+WinPush.ExecutionResult
+
+.NOTES
+Package transport is PSRP only. ExpectedSha256 is optional; callers remain responsible for provenance and approval policy.
+
+.LINK
+docs/package-workflow.md
+#>
 function Invoke-WinPushPackage {
     [CmdletBinding(DefaultParameterSetName = 'PathComputerName')]
     param(

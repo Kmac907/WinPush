@@ -1,3 +1,65 @@
+<#
+.SYNOPSIS
+Runs command text on one or more Windows targets.
+
+.DESCRIPTION
+Resolves direct, pipeline, or host-file targets and runs non-empty command text through PSRP, native WinRS, or PsExec. PSRP is the default. Each target produces a structured result; optional capture writes one shared run, and PSRP can collect convention-based logs.
+
+.PARAMETER ComputerName
+Target names supplied directly, through pipeline strings, or through pipeline objects with a ComputerName property. Use this parameter or HostFile.
+
+.PARAMETER HostFile
+A UTF-8 target file. Blank lines and full-line comments beginning with # are ignored, and duplicate targets are removed case-insensitively.
+
+.PARAMETER Command
+Non-empty command text. PSRP Auto mode treats it as PowerShell source; native transport behavior depends on Shell.
+
+.PARAMETER Transport
+The execution transport: Psrp, WinRM, or PsExec. The default is Psrp. WinRM selects native winrs.exe.
+
+.PARAMETER Shell
+The command shell: Auto, PowerShell, or Cmd. Auto preserves the transport default, PowerShell forces encoded PowerShell, and Cmd forces cmd.exe /d /s /c.
+
+.PARAMETER TimeoutSeconds
+The native WinRS or PsExec process timeout from 0 through 2147483647 seconds. The default is 1800. Zero disables the timeout; a timeout returns exit code 124.
+
+.PARAMETER PsExecPath
+An optional path to PsExec.exe. This parameter is valid only with the PsExec transport; PATH discovery is used when omitted.
+
+.PARAMETER Credential
+An optional credential for PSRP session creation. This parameter is not supported with WinRM or PsExec.
+
+.PARAMETER CaptureOutput
+Writes one shared summary.csv, one correlated root run.log, and one per-target run.log beneath OutputRoot.
+
+.PARAMETER Logs
+Copies immediate convention-based command log files through the PSRP session. This parameter is not supported with WinRM or PsExec.
+
+.PARAMETER OutputRoot
+The local artifact root used by capture and log collection. The default is C:\WinPush.
+
+.EXAMPLE
+Invoke-WinPushCommand -ComputerName PC01 -Command 'hostname'
+
+Runs PowerShell command text through the default PSRP transport.
+
+.EXAMPLE
+Invoke-WinPushCommand -HostFile .\hosts.txt -Command 'ver' -Transport WinRM -Shell Cmd -TimeoutSeconds 120 -CaptureOutput
+
+Runs cmd.exe through WinRS for each host-file target and captures one shared run.
+
+.INPUTS
+System.String and objects with a ComputerName property.
+
+.OUTPUTS
+WinPush.ExecutionResult
+
+.NOTES
+Credential and Logs are PSRP-only. Multi-target execution continues after a per-target failure.
+
+.LINK
+docs/commands.md#shell-and-timeout-behavior
+#>
 function Invoke-WinPushCommand {
     [CmdletBinding(DefaultParameterSetName = 'ComputerName')]
     param(

@@ -1,3 +1,47 @@
+<#
+.SYNOPSIS
+Copies one file to or from one Windows target through PSRP.
+
+.DESCRIPTION
+Creates a temporary PSSession and uploads one existing local file or downloads one remote file. Upload is the default direction. The command returns a structured result and always removes the temporary session.
+
+.PARAMETER ComputerName
+The single target computer. Arrays and target lists are not supported by this command.
+
+.PARAMETER Path
+For uploads, the existing local source file. For downloads, the remote source file.
+
+.PARAMETER Destination
+For uploads, the remote destination path. For downloads, a local filesystem destination whose parent directory already exists.
+
+.PARAMETER Direction
+The transfer direction. Valid values are Upload and Download. The default is Upload.
+
+.PARAMETER Credential
+An optional credential for PSRP session creation. The current Windows identity is used when omitted.
+
+.EXAMPLE
+Copy-WinPushItem -ComputerName PC01 -Path .\payload.txt -Destination C:\Windows\Temp\payload.txt
+
+Uploads one local file to PC01.
+
+.EXAMPLE
+Copy-WinPushItem -ComputerName PC01 -Path C:\Windows\Temp\result.txt -Destination .\result.txt -Direction Download
+
+Downloads one remote file from PC01.
+
+.INPUTS
+None. This command does not accept pipeline input.
+
+.OUTPUTS
+WinPush.ExecutionResult
+
+.NOTES
+Only PSRP, one target, and one file are supported. The command does not recurse or expand wildcard paths.
+
+.LINK
+docs/commands.md
+#>
 function Copy-WinPushItem {
     [CmdletBinding()]
     param(

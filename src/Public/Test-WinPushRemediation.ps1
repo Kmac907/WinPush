@@ -1,3 +1,33 @@
+<#
+.SYNOPSIS
+Validates a detection and remediation script pair without executing it.
+
+.DESCRIPTION
+Resolves two existing local .ps1 files and parses them with Windows PowerShell 5.1. Parser and file failures are errors. Missing literal detection exit 0 or exit 1 paths and detected reboot commands are reported as warnings.
+
+.PARAMETER DetectScript
+An existing local .ps1 detection script to parse. Detection convention expects literal exit 0 and exit 1 paths.
+
+.PARAMETER RemediateScript
+An existing local .ps1 remediation script to parse.
+
+.EXAMPLE
+Test-WinPushRemediation -DetectScript .\Detect.ps1 -RemediateScript .\Remediate.ps1
+
+Parses both files without executing either script.
+
+.INPUTS
+None. This command does not accept pipeline input.
+
+.OUTPUTS
+WinPush.RemediationValidationResult
+
+.NOTES
+The result contains IsValid, resolved script paths, Errors, and Warnings. A warning does not make IsValid false.
+
+.LINK
+docs/examples.md#validate-and-run-remediation
+#>
 function Test-WinPushRemediation {
     [CmdletBinding()]
     param(

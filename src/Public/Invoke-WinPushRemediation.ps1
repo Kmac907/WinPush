@@ -1,3 +1,65 @@
+<#
+.SYNOPSIS
+Runs a detection and remediation script pair on Windows targets.
+
+.DESCRIPTION
+Validates both local scripts with the Windows PowerShell 5.1 parser, resolves targets, stages the pair, and runs detection through PSRP, WinRS, or PsExec. Detection exit 0 means compliant; exit 1 runs remediation. Staged files are removed after execution, and each target returns phase metadata.
+
+.PARAMETER ComputerName
+Target names supplied directly, through pipeline strings, or through pipeline objects with a ComputerName property. Use this parameter or HostFile.
+
+.PARAMETER HostFile
+A UTF-8 target file. Blank lines and full-line comments beginning with # are ignored, and duplicate targets are removed case-insensitively.
+
+.PARAMETER DetectScript
+An existing local .ps1 detection script. Exit 0 means compliant and exit 1 requests remediation.
+
+.PARAMETER RemediateScript
+An existing local .ps1 remediation script. Exit 0 means successfully remediated.
+
+.PARAMETER Transport
+The execution transport: Psrp, WinRM, or PsExec. The default is Psrp. WinRM selects native winrs.exe.
+
+.PARAMETER TimeoutSeconds
+The native staging and phase timeout from 0 through 2147483647 seconds. The default is 1800. Zero disables the timeout.
+
+.PARAMETER PsExecPath
+An optional path to PsExec.exe. This parameter is valid only with the PsExec transport; PATH discovery is used when omitted.
+
+.PARAMETER Credential
+An optional credential for PSRP session creation. This parameter is not supported with WinRM or PsExec.
+
+.PARAMETER CaptureOutput
+Writes one shared summary.csv, one correlated root run.log, and one per-target run.log beneath OutputRoot.
+
+.PARAMETER Logs
+Copies immediate convention-based files for both script base names through PSRP. This parameter is not supported with WinRM or PsExec.
+
+.PARAMETER OutputRoot
+The local artifact root used by capture and log collection. The default is C:\WinPush.
+
+.EXAMPLE
+Invoke-WinPushRemediation -ComputerName PC01 -DetectScript .\Detect.ps1 -RemediateScript .\Remediate.ps1
+
+Validates and runs the pair through PSRP.
+
+.EXAMPLE
+Invoke-WinPushRemediation -HostFile .\hosts.txt -DetectScript .\Detect.ps1 -RemediateScript .\Remediate.ps1 -Transport WinRM -TimeoutSeconds 300 -CaptureOutput
+
+Runs the pair through WinRS for each host-file target and captures one shared run.
+
+.INPUTS
+System.String and objects with a ComputerName property.
+
+.OUTPUTS
+WinPush.ExecutionResult
+
+.NOTES
+Results include WinPush.RemediationMetadata. Staged scripts are removed after execution. Credential and Logs are PSRP-only.
+
+.LINK
+docs/examples.md#validate-and-run-remediation
+#>
 function Invoke-WinPushRemediation {
     [CmdletBinding(DefaultParameterSetName = 'ComputerName')]
     param(

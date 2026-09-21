@@ -78,6 +78,30 @@ Describe 'WinPush module import foundation' {
         $manifest.ContainsKey('RequiredModules') | Should Be $false
     }
 
+    It 'provides complete native help for every manifest export' {
+        $manifest = Import-PowerShellDataFile -LiteralPath $script:ManifestPath
+        $commonParameters = @([System.Management.Automation.Cmdlet]::CommonParameters) +
+            @([System.Management.Automation.Cmdlet]::OptionalCommonParameters)
+
+        Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
+        Import-Module $script:ManifestPath -Force
+
+        foreach ($functionName in @($manifest.FunctionsToExport)) {
+            $command = Get-Command -Name $functionName -Module WinPush -ErrorAction Stop
+            $help = Get-Help -Name $functionName -Full
+            $metadataParameters = @($command.Parameters.Keys |
+                    Where-Object { $_ -notin $commonParameters } |
+                    Sort-Object)
+            $helpParameters = @($help.Parameters.Parameter.Name | Sort-Object)
+
+            [string]::IsNullOrWhiteSpace([string] $help.Synopsis) | Should Be $false
+            ([string] $help.Synopsis -match '(?i)short description|^\s*<.*>\s*$') | Should Be $false
+            [string]::IsNullOrWhiteSpace([string] ($help.Description.Text -join ' ')) | Should Be $false
+            @($help.Examples.Example).Count -gt 0 | Should Be $true
+            ($helpParameters -join ',') | Should Be ($metadataParameters -join ',')
+        }
+    }
+
     It 'uses the same explicit export list when the root module is imported directly' {
         Remove-Module -Name WinPush -Force -ErrorAction SilentlyContinue
         Import-Module (Join-Path -Path $script:ModuleRoot -ChildPath 'WinPush.psm1') -Force

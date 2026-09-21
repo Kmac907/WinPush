@@ -1,3 +1,65 @@
+<#
+.SYNOPSIS
+Runs a local PowerShell script on one or more Windows targets.
+
+.DESCRIPTION
+Validates one existing local .ps1 file, resolves direct, pipeline, or host-file targets, and runs the script through PSRP, native WinRS, or PsExec. Native transports stage the script under C:\Windows\Temp\WinPush before execution. Each target produces a structured result.
+
+.PARAMETER ComputerName
+Target names supplied directly, through pipeline strings, or through pipeline objects with a ComputerName property. Use this parameter or HostFile.
+
+.PARAMETER HostFile
+A UTF-8 target file. Blank lines and full-line comments beginning with # are ignored, and duplicate targets are removed case-insensitively.
+
+.PARAMETER ScriptPath
+An existing local filesystem .ps1 file.
+
+.PARAMETER Transport
+The execution transport: Psrp, WinRM, or PsExec. The default is Psrp. WinRM selects native winrs.exe.
+
+.PARAMETER TimeoutSeconds
+The native staging and execution timeout from 0 through 2147483647 seconds. The default is 1800. Zero disables the timeout.
+
+.PARAMETER PsExecPath
+An optional path to PsExec.exe. This parameter is valid only with the PsExec transport; PATH discovery is used when omitted.
+
+.PARAMETER Credential
+An optional credential for PSRP session creation. This parameter is not supported with WinRM or PsExec.
+
+.PARAMETER CaptureOutput
+Writes one shared summary.csv, one correlated root run.log, and one per-target run.log beneath OutputRoot.
+
+.PARAMETER Logs
+Copies immediate convention-based script log files through the PSRP session. This parameter is not supported with WinRM or PsExec.
+
+.PARAMETER KeepStagedScript
+Retains the native-transport stage on the target for troubleshooting. Native stages are removed by default. This switch has no effect on PSRP file-path execution.
+
+.PARAMETER OutputRoot
+The local artifact root used by capture and log collection. The default is C:\WinPush.
+
+.EXAMPLE
+Invoke-WinPushScript -ComputerName PC01 -ScriptPath .\Inventory.ps1 -CaptureOutput
+
+Runs Inventory.ps1 through PSRP and captures its result.
+
+.EXAMPLE
+Invoke-WinPushScript -ComputerName PC01 -ScriptPath .\Inventory.ps1 -Transport PsExec -PsExecPath C:\Tools\PsExec.exe
+
+Stages and runs Inventory.ps1 through PsExec, then removes the generated stage.
+
+.INPUTS
+System.String and objects with a ComputerName property.
+
+.OUTPUTS
+WinPush.ExecutionResult
+
+.NOTES
+Script arguments are not supported. Credential and Logs are PSRP-only.
+
+.LINK
+docs/examples.md#run-a-local-script
+#>
 function Invoke-WinPushScript {
     [CmdletBinding(DefaultParameterSetName = 'ComputerName')]
     param(
